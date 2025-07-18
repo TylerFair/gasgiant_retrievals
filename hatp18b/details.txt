@@ -1,0 +1,1 @@
+Currently this only takes into account the R100 NIRISS data 
