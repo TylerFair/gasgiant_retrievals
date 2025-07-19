@@ -1,4 +1,4 @@
-This directory contains all of my scripts for each plaent and each retrieval
+This directory contains all of my scripts for each planet and each retrieval
 
 Lablled as : 
 
