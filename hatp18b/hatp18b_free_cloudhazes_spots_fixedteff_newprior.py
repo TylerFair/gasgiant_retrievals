@@ -14,7 +14,7 @@ df1 = pd.read_csv('hatp18b_niriss_R100.csv')
 waves = df1['CENTRALWAVELNG'].values 
 hw = df1['BANDWIDTH'].values 
 depths = df1['PL_TRANDEP'].values / 100  
-errors = np.sqrt((df1['PL_TRANDEPERR1'].values/100)**2 + (df1['PL_TRANDEPERR2'].values/100)**2) 
+errors = df1['PL_TRANDEPERR1'].values/100 #np.sqrt((df1['PL_TRANDEPERR1'].values/100)**2 + (df1['PL_TRANDEPERR2'].values/100)**2) 
 
 bins = 1e-6 * np.array([waves - hw, waves + hw]).T
 '''plt.errorbar(waves[0:1010], depths[0:1010], yerr=errors[0:1010], fmt='.')
@@ -51,7 +51,7 @@ fit_info.add_uniform_fit_param("scatt_slope", 0, 12)
 #fit_info.add_gaussian_fit_param("T_star", 4803, 80)
 fit_info.add_uniform_fit_param("T_spot", 3000, 4803)  # can make upper U 4803
 fit_info.add_uniform_fit_param("spot_cov_frac", 0, 0.2) # can make upper U 0.2 
-#fit_info.add_uniform_fit_param("offset_transit", -200e-6, 200e-6)
+fit_info.add_uniform_fit_param("offset_transit", -300e-6, 300e-6)
 #fit_info.add_uniform_fit_param("error_multiple", 0.5, 5)
 
 fit_info.add_gases_vmr(["Na", "K", "H2O", "CO", "CO2", "CH4", "HCN", "NH3", "H2-He"], 1e-12, 1e-1)
