@@ -167,11 +167,15 @@ class CombinedRetriever:
         
         try:
             if measured_transit_depths is not None:
-                if T is None:
-                    raise ValueError("Must fit for T if using transit depths")
-
+                #if T is None:
+                #    raise ValueError("Must fit for T if using transit depths")
+                t_p_profile = Profile()
+                t_p_profile.set_from_params_dict(params_dict["profile_type"], params_dict)
+                if np.any(np.isnan(t_p_profile.temperatures)):
+                    raise AtmosphereError("Invalid T/P profile")
+                
                 transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
-                    Rs, Mp, Rp, T, logZ, CO_ratio, CH4_mult, gases, vmrs,
+                    t_p_profile, Rs, Mp, Rp, T, logZ, CO_ratio, CH4_mult, gases, vmrs,
                     custom_abundances=None,
                     scattering_factor=scatt_factor, scattering_slope=scatt_slope,
                     cloudtop_pressure=cloudtop_P, T_star=T_star,
