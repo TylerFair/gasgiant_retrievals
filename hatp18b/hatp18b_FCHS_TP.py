@@ -49,10 +49,10 @@ elif profile_type == 'parametric':
         T_star=T_star, T_spot=4300, spot_cov_frac=0.05,
         profile_type=profile_type, 
         T0=T_eq, 
-        log_P1=0,           
-        alpha1=0.1, 
-        alpha2=0.1, 
-        log_P3=0,           
+        log_P1=2,           
+        alpha1=0.9, 
+        alpha2=0.8, 
+        log_P3=6,           
         T3=T_eq + 500,
     )
 
@@ -63,11 +63,12 @@ if profile_type == 'isothermal':
     fit_info.add_uniform_fit_param('T', 300, 1000)
 elif profile_type == 'parametric':
     fit_info.add_uniform_fit_param('T0', 300, 1000)
+    fit_info.add_uniform_fit_param('T3', 300, 2500)
     fit_info.add_uniform_fit_param('log_P1', 0, 8)
+    fit_info.add_uniform_fit_param('log_P3', 0, 8)
+
     fit_info.add_uniform_fit_param('alpha1', 0, 1)
     fit_info.add_uniform_fit_param('alpha2', 0, 1)
-    fit_info.add_uniform_fit_param('log_P3', 0, 8)
-    fit_info.add_uniform_fit_param('T3', 300, 2000)
 
 fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8)
 fit_info.add_uniform_fit_param("log_scatt_factor", -2, 5)
