@@ -119,13 +119,12 @@ class TransitDepthCalculator:
 
         return xp.array(binned_wavelengths), xp.array(binned_depths), xp.array(binned_stellar_spectrum), xp.array(intermediate_lambdas), xp.array(intermediate_depths), xp.array(intermediate_stellar_spectrum), xp.array(intermediate_correction_factors)
 
-    def _validate_params(self, T, logZ, CO_ratio, cloudtop_pressure):
-        T_profile = xp.ones(NUM_LAYERS) * T
-        self.atm._validate_params(T, logZ, CO_ratio, cloudtop_pressure)
+    def _validate_params(self, T_profile, logZ, CO_ratio, cloudtop_pressure):
+        self.atm._validate_params(T_profile, logZ, CO_ratio, cloudtop_pressure)
         
     
     def compute_depths(self, t_p_profile, star_radius, planet_mass, planet_radius,
-                       T_star=None, logZ=0, CO_ratio=0.53, CH4_mult=1,
+                       logZ=0, CO_ratio=0.53, CH4_mult=1,
                        gases=None, vmrs=None,
                        add_gas_absorption=True, add_H_minus_absorption=False,
                        add_scattering=True, scattering_factor=1,
@@ -133,7 +132,7 @@ class TransitDepthCalculator:
                        add_collisional_absorption=True,
                        cloudtop_pressure=xp.inf, custom_abundances=None,
                        custom_T_profile=None, custom_P_profile=None,
-                       T_spot=None, spot_cov_frac=None,
+                        T_star=None, T_spot=None, spot_cov_frac=None,
                        ri=None, frac_scale_height=1, number_density=0,
                        part_size=1e-6, part_size_std=0.5, P_quench=1e-99,
                        full_output=False, min_abundance=1e-99, min_cross_sec=1e-99, stellar_blackbody=False, zero_opacities=[]):
@@ -254,8 +253,6 @@ class TransitDepthCalculator:
             stellar_spectrum, radii, P_profile, T_profile, mu_profile,
             atm_abundances, unbinned_depths, unbinned_wavelengths
        '''
-        # temperature is just used to build TP profile, so we can swap 
-        # that out with the profile itself. 
         T_profile = t_p_profile.temperatures 
         P_profile = t_p_profile.pressures 
 
