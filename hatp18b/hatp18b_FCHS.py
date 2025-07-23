@@ -29,14 +29,15 @@ fit_info = retriever.get_default_fit_info(
     T_star=4803, T_spot=4300, spot_cov_frac=0.05, # stellar surface
  )
 
+# PLATON Gaussian's take the form **STD DEV ONLY**, watch out!!!!
+fit_info.add_gaussian_fit_param('Mp', 0.013 * M_jup)
+fit_info.add_gaussian_fit_param("T_star", 80)
 
-fit_info.add_gaussian_fit_param('Mp', 0.197 * M_jup, 0.013 * M_jup)
 fit_info.add_uniform_fit_param('Rp', 0.85 * R_jup, 1.15 * R_jup)
 fit_info.add_uniform_fit_param('T', 300, 1000)
 fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8)
 fit_info.add_uniform_fit_param("log_scatt_factor", -2, 5)
 fit_info.add_uniform_fit_param("scatt_slope", 0, 12)
-#fit_info.add_gaussian_fit_param("T_star", 4803, 80) # this is commented out due to bug with N~4803,80. 
 fit_info.add_uniform_fit_param("T_spot", 3000, 4803)  
 fit_info.add_uniform_fit_param("spot_cov_frac", 0, 0.2) 
 
