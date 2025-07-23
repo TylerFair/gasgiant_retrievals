@@ -63,10 +63,10 @@ if profile_type == 'isothermal':
     fit_info.add_uniform_fit_param('T', 300, 1000)
 elif profile_type == 'parametric':
     fit_info.add_uniform_fit_param('T0', 300, 1000)
-    fit_info.add_uniform_fit_param('log_P1', -4, 2)
-    fit_info.add_uniform_fit_param('alpha1', -2, 2)
-    fit_info.add_uniform_fit_param('alpha2', -2, 2)
-    fit_info.add_uniform_fit_param('log_P3', -4, 2)
+    fit_info.add_uniform_fit_param('log_P1', 0, 8)
+    fit_info.add_uniform_fit_param('alpha1', 0, 1)
+    fit_info.add_uniform_fit_param('alpha2', 0, 1)
+    fit_info.add_uniform_fit_param('log_P3', 0, 8)
     fit_info.add_uniform_fit_param('T3', 300, 2000)
 
 fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8)
