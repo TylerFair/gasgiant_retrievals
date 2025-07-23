@@ -92,7 +92,8 @@ class CombinedRetriever:
             for lim in [this_param.low_lim, this_param.high_lim]:
                 this_param.best_guess = lim
                 calculator._validate_params(
-                    fit_info._get("T"),
+                    T_PROFILE,
+                    #fit_info._get("'T0','log_P1', 'alpha1', 'alpha2', 'log_P3', 'T3'"),
                     fit_info._get("logZ"),
                     fit_info._get("CO_ratio"),
                     10**fit_info._get("log_cloudtop_P"))
@@ -178,8 +179,8 @@ class CombinedRetriever:
                     t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
                     custom_abundances=None,
                     scattering_factor=scatt_factor, scattering_slope=scatt_slope,
-                    cloudtop_pressure=cloudtop_P, T_star=T_star,
-                    T_spot=T_spot, spot_cov_frac=spot_cov_frac,
+                    cloudtop_pressure=cloudtop_P, 
+                    T_star=T_star, T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                     frac_scale_height=frac_scale_height, number_density=number_density,
                     part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
 
@@ -544,7 +545,8 @@ class CombinedRetriever:
             transit_calc = TransitDepthCalculator(
                 include_condensation=include_condensation, method=rad_method)
             transit_calc.change_wavelength_bins(transit_bins)
-            self._validate_params(fit_info, transit_calc)
+            #self._validate_params(fit_info, transit_calc)
+
         if eclipse_bins is not None:
             eclipse_calc = EclipseDepthCalculator(
                 include_condensation=include_condensation, method=rad_method)
@@ -620,7 +622,6 @@ class CombinedRetriever:
                 eclipse_depths, eclipse_errors, ret_best_fit=True)
             if transit_depths is not None:                                                
                 retrieval_result.random_transit_depths.append(transit_info["unbinned_depths"] * transit_info["unbinned_correction_factors"])
-                # add support for random binned depths and tp profile draws for posterior. 
                 retrieval_result.random_binned_transit_depths.append(transit_info["binned_depths"])
                 retrieval_result.random_TP_profiles.append(np.array([transit_info["P_profile"], transit_info["T_profile"]]))
             if eclipse_depths is not None:
