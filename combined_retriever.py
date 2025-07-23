@@ -91,9 +91,12 @@ class CombinedRetriever:
 
             for lim in [this_param.low_lim, this_param.high_lim]:
                 this_param.best_guess = lim
+                p = Profile()
+                p.set_parametric(fit_info._get('T0'), 10**fit_info._get('log_P1'), fit_info._get('alpha1'), 
+                                 fit_info._get('alpha2'), 10**fit_info._get('log_P3'), fit_info._get('T3'))
                 calculator._validate_params(
-                    T_PROFILE,
-                    #fit_info._get("'T0','log_P1', 'alpha1', 'alpha2', 'log_P3', 'T3'"),
+                    p.temperatures,
+                    #fit_info._get("T"),
                     fit_info._get("logZ"),
                     fit_info._get("CO_ratio"),
                     10**fit_info._get("log_cloudtop_P"))
@@ -168,7 +171,8 @@ class CombinedRetriever:
         
         try:
             if measured_transit_depths is not None:
-                #if T is None:
+                if T is None:
+                    assert params_dict["profile_type"] != "isothermal"
                 #    raise ValueError("Must fit for T if using transit depths")
                 t_p_profile = Profile()
                 t_p_profile.set_from_params_dict(params_dict["profile_type"], params_dict)
@@ -545,7 +549,7 @@ class CombinedRetriever:
             transit_calc = TransitDepthCalculator(
                 include_condensation=include_condensation, method=rad_method)
             transit_calc.change_wavelength_bins(transit_bins)
-            #self._validate_params(fit_info, transit_calc)
+            self._validate_params(fit_info, transit_calc)
 
         if eclipse_bins is not None:
             eclipse_calc = EclipseDepthCalculator(
