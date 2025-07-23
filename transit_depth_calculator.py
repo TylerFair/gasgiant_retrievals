@@ -254,6 +254,8 @@ class TransitDepthCalculator:
             stellar_spectrum, radii, P_profile, T_profile, mu_profile,
             atm_abundances, unbinned_depths, unbinned_wavelengths
        '''
+        # temperature is just used to build TP profile, so we can swap 
+        # that out with the profile itself. 
         T_profile = t_p_profile.temperatures 
         P_profile = t_p_profile.pressures 
 
