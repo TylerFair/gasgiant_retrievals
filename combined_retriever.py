@@ -89,18 +89,21 @@ class CombinedRetriever:
                 raise ValueError(
                     "low_lim for {} is higher than high_lim".format(name))
 
+
+            '''
             for lim in [this_param.low_lim, this_param.high_lim]:
                 this_param.best_guess = lim
                 p = Profile()
                 p.set_parametric(fit_info._get('T0'), 10**fit_info._get('log_P1'), fit_info._get('alpha1'), 
-                                 fit_info._get('alpha2'), 10**fit_info._get('log_P3'), fit_info._get('T3'))
+                                 fit_info._get('alpha2'), 10**fit_info._get('log_P2'), 10**fit_info._get('log_P3'))
                 calculator._validate_params(
                     p.temperatures,
                     #fit_info._get("T"),
                     fit_info._get("logZ"),
                     fit_info._get("CO_ratio"),
                     10**fit_info._get("log_cloudtop_P"))
-
+            '''
+                    
     @staticmethod
     def convert_clr_to_vmr(clrs):
         clr_bkg = -np.sum(clrs)
@@ -677,7 +680,7 @@ class CombinedRetriever:
             and hence is only relevant for eclipse depths.
         profile_kwargs : kwargs
             T/P profile arguments.  For "isothermal": T_day.  For "parametric":
-            T0, P1, alpha1, alpha2, P3, T3.  For "radiative_solution":
+            T0, P1, alpha1, alpha2, P2, P3.  For "radiative_solution":
             T_star, Rs, a, Mp, Rp, beta, log_k_th, log_gamma, log_gamma2,
             alpha, and T_int (optional).  We recommend that T_star, Rs, a, and 
             Mp be fixed, and that T_int be omitted (which sets it to 100 K).
