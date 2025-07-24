@@ -25,7 +25,7 @@ Rp = 0.995 * R_jup
 T_eq = 852  
 T_star = 4803
 
-profile_type = 'parametric'  # 'isothermal' or 'parametric'
+profile_type = 'parametric'  # 'isothermal', 'parametric'
 
 retriever = CombinedRetriever()
 
@@ -52,8 +52,8 @@ elif profile_type == 'parametric':
         log_P1=2,           
         alpha1=0.9, 
         alpha2=0.8, 
+        log_P2=4,
         log_P3=6,           
-        T3=T_eq + 500,
     )
 
 
@@ -63,18 +63,17 @@ if profile_type == 'isothermal':
     fit_info.add_uniform_fit_param('T', 300, 1000)
 elif profile_type == 'parametric':
     fit_info.add_uniform_fit_param('T0', 300, 1000)
-    fit_info.add_uniform_fit_param('T3', 300, 2500)
-    fit_info.add_uniform_fit_param('log_P1', 0, 8)
-    fit_info.add_uniform_fit_param('log_P3', 0, 8)
+    fit_info.add_uniform_fit_param('log_P1', -3, 7)
+    fit_info.add_uniform_fit_param('log_P2', -3, 7)
+    fit_info.add_uniform_fit_param('log_P3', 3, 7)
+    fit_info.add_uniform_fit_param('alpha1', 0.02, 2)
+    fit_info.add_uniform_fit_param('alpha2', 0.02, 2)
 
-    fit_info.add_uniform_fit_param('alpha1', 0, 1)
-    fit_info.add_uniform_fit_param('alpha2', 0, 1)
+fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8) 
+fit_info.add_uniform_fit_param("log_scatt_factor", -2, 5) # investigate -3, 3; -4, 10
 
-fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8)
-fit_info.add_uniform_fit_param("log_scatt_factor", -2, 5)
-
-fit_info.add_uniform_fit_param("scatt_slope", 0, 12)
-fit_info.add_uniform_fit_param("T_spot", 3000, 4803)  
+fit_info.add_uniform_fit_param("scatt_slope", 0, 12) # investigate 2, 5; -2, 20
+fit_info.add_uniform_fit_param("T_spot", 0.5 * T_star, 1.5 * T_star)  
 fit_info.add_uniform_fit_param("spot_cov_frac", 0, 0.2)
 fit_info.add_gaussian_fit_param("T_star", 80) #4803, 80)
 
