@@ -45,26 +45,27 @@ class Profile:
     def set_parametric(self, T0, P1, alpha1, alpha2, P2, P3):
         '''Parametric model from https://arxiv.org/pdf/0910.1347.pdf'''
         P0 = xp.amin(self.pressures)
-        
-        #P2 = P0 * exp(alpha1(T2 - T0)^(beta1))
-        # ln(P2/P0) = alpha1 * (T2-T0)^beta1
-        # power(ln(P2/P0)/alpha1, 1/beta1) = T2-T0
-        # T2 = T0 + power(ln(P2/P0)/alpha1, 1/beta1)
-        T2 = T0 + xp.power(xp.log(P2/P0)/alpha1, 2.0) # beta = 0.5
+        # confused on if you should enforce continuity or not,
+        # and whether its natural log or base 10 ? 
+        # MS09 is definitely natural, given on the form P = Px * exp(...) 
+        # but poseidon and PRT do base 10 so alpha is scaled by log10
+        #T2 = T0 + xp.power(xp.log(P2/P0)/alpha1, 2.0) # beta = 0.5
+        #T3 = T2 + xp.power(xp.log(P3/P2)/alpha2, 2.0) # beta = 0.5
+        T1 = T0 + xp.power(xp.log(P1/P0)/alpha1, 2.0) # beta = 0.5
+        T2 = T1 - xp.power(xp.log(P1/P2)/alpha2, 2.0)
         T3 = T2 + xp.power(xp.log(P3/P2)/alpha2, 2.0) # beta = 0.5
-        #ln_P2 = alpha2**2*(T0+xp.log(P1/P0)**2/alpha1**2 - T3) - xp.log(P1)**2 + xp.log(P3)**2
-        #ln_P2 /= 2 * xp.log(P3/P1)
-        #P2 = xp.exp(ln_P2)
-        #T2 = T3 - xp.log(P3/P2)**2/alpha2**2
+  
+
         self.temperatures = xp.zeros(len(self.pressures))
         for i, P in enumerate(self.pressures):
             if P < P1:
-                self.temperatures[i] = T0 + xp.log(P/P0)**2 / alpha1**2
+                self.temperatures[i] = T0 + xp.power(xp.log(P/P0)/alpha1, 2.0)
             elif P < P3:
-                self.temperatures[i] = T2 + xp.log(P/P2)**2 / alpha2**2
+                self.temperatures[i] = T2 + xp.power(xp.log(P/P2)/alpha2, 2.0)
             else:
                 self.temperatures[i] = T3
         return T2, T3
+
 
     def set_from_opacity(self, T_irr, info_dict, visible_cutoff=0.8e-6, T_int=100):
         wavelengths = xp.array(info_dict["unbinned_wavelengths"])
