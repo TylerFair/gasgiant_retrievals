@@ -137,6 +137,7 @@ class CombinedRetriever:
         T_star = params_dict["T_star"]
         T_spot = params_dict["T_spot"]
         spot_cov_frac = params_dict["spot_cov_frac"]
+        cloud_cov_frac = params_dict['cloud_cov_frac']
         frac_scale_height = params_dict["frac_scale_height"]
         number_density = 10.0**params_dict["log_number_density"]
         part_size = 10.**params_dict["log_part_size"]
@@ -182,14 +183,35 @@ class CombinedRetriever:
                 if np.any(np.isnan(t_p_profile.temperatures)):
                     raise AtmosphereError("Invalid T/P profile")
                 
-                transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
-                    t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
-                    custom_abundances=None,
-                    scattering_factor=scatt_factor, scattering_slope=scatt_slope,
-                    cloudtop_pressure=cloudtop_P, 
-                    T_star=T_star, T_spot=T_spot, spot_cov_frac=spot_cov_frac,
-                    frac_scale_height=frac_scale_height, number_density=number_density,
-                    part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
+                if cloud_cov_frac is not None:
+                    transit_wavelengths, calculated_transit_depths_clear, transit_info_dict = transit_calc.compute_depths(
+                        t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
+                        custom_abundances=None,
+                        scattering_factor=scatt_factor, scattering_slope=scatt_slope,
+                        cloudtop_pressure=cloudtop_P, 
+                        T_star=T_star, T_spot=T_spot, spot_cov_frac=spot_cov_frac, 
+                        frac_scale_height=frac_scale_height, number_density=number_density,
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
+
+                    transit_wavelengths, calculated_transit_depths_cloudy, transit_info_dict = transit_calc.compute_depths(
+                        t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
+                        custom_abundances=None,
+                        scattering_factor=scatt_factor, scattering_slope=scatt_slope,
+                        cloudtop_pressure=cloudtop_P, 
+                        T_star=T_star, T_spot=T_spot, spot_cov_frac=spot_cov_frac, 
+                        frac_scale_height=frac_scale_height, number_density=number_density,
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
+                    
+                    calculated_transit_depths = cloud_cov_frac * calculated_transit_depths_cloudy + (1 - cloud_cov_frac) * calculated_transit_depths_clear
+                else: 
+                    transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
+                        t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
+                        custom_abundances=None,
+                        scattering_factor=scatt_factor, scattering_slope=scatt_slope,
+                        cloudtop_pressure=cloudtop_P, 
+                        T_star=T_star, T_spot=T_spot, spot_cov_frac=spot_cov_frac, 
+                        frac_scale_height=frac_scale_height, number_density=number_density,
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
 
                 #calculated_transit_depths[0:1010] += params_dict["offset_niriss"]
                 #calculated_transit_depths[1010:2397] += params_dict["offset_nrs1"]
@@ -646,7 +668,7 @@ class CombinedRetriever:
                              free_retrieval=False,
                              log_cloudtop_P=np.inf, log_scatt_factor=0,
                              scatt_slope=4, error_multiple=1, T_star=None,
-                             T_spot=None, spot_cov_frac=None,
+                             T_spot=None, spot_cov_frac=None, cloud_cov_frac=None,
                              frac_scale_height=1,
                              log_number_density=-np.inf, log_part_size=-6,
                              n=None, log_k=-np.inf,
