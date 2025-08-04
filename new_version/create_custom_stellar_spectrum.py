@@ -6,6 +6,7 @@ import pickle
 import astropy.units as u
 from astropy.constants import h, c
 import pysynphot as S 
+from spectres import spectres 
 
 def create_stellar_grid_data(logg, feh):
     def air_to_vac(wavelength):
@@ -16,14 +17,15 @@ def create_stellar_grid_data(logg, feh):
         wlum = wavelength.to(u.um).value
         return (1 + 1e-6*(287.6155 + 1.62887/wlum**2 + 0.01360/wlum**4)) * wavelength
 
-    binned_wavelengths = np.load("../platon/data/low_res_lambdas.npy") * u.meter
+    binned_wavelengths = np.load("../platon/data/low_res_lambdas.npy") #* u.meter
 
+    
     output_spectra = {}
     temps = []
     spectra = []
 
 
-    for temperature in np.arange(2000, 12000, 100):
+    for temperature in np.arange(3500, 12000, 100):
         #filename = "bt-settl-agss/lte{0:03d}-4.5-0.0a+0.0.BT-Settl.7.dat.txt".format(int(temperature/100))
         #alt_filename = "bt-settl-agss/lte0{0}-4.5-0.0.BT-Settl.7.dat.txt".format(int(temperature/100))
         
@@ -33,15 +35,27 @@ def create_stellar_grid_data(logg, feh):
         #    wavelengths, spectrum = np.loadtxt(alt_filename, unpack=True)
         #else:
         #    continue
-        sp = S.Icat('phoenix', temperature, feh, logg)
-        wavelengths = sp.wave
-        spectrum = sp.flux
+        sp = S.Icat('ck04models', temperature, feh, logg) #S.Icat('phoenix', temperature, feh, logg)
 
+        sp.convert("m")                # Convert wavelengths to meter
+        sp.convert('flam')              # Convert to flux units (erg/s/cm^2/A)
+        
+        wl_grid = sp.wave                         # Stellar wavelength array (m)
+        I_grid = (sp.flux*1e-7*1e4*1e10)/np.pi    # Convert to W/m^2/sr/m
+
+        # Bin / interpolate stellar spectrum to output wavelength grid
+        binned_spectrum = spectres(binned_wavelengths, wl_grid, I_grid)
+
+
+        '''
         wavelengths *= u.Angstrom
         wavelengths = air_to_vac(wavelengths)
         spectrum *= (u.erg/u.cm**2/u.s/u.Angstrom)
+
+        binned_spectrum = sp.binwave
         
         binned_spectrum = []
+
 
         avg_log_interval = np.median(np.diff(np.log10(np.unique(binned_wavelengths).value)))
         conversion_factor = None
@@ -59,6 +73,9 @@ def create_stellar_grid_data(logg, feh):
             binned_spectrum.append(flux.value)
         #print(len(binned_spectrum))
         binned_spectrum = np.array(binned_spectrum) * conversion_factor
+        '''
+
+
 
         spectra.append(binned_spectrum)
         temps.append(temperature)
@@ -67,7 +84,7 @@ def create_stellar_grid_data(logg, feh):
     output_spectra['temperatures'] = np.array(temps)
     output_spectra['spectra'] = np.array(spectra)
 
-    with open("data/stellar_spectra.pkl", "wb") as f:
+    with open("/Users/tyler/Downloads/SRA/platon/platon/data/stellar_spectra.pkl", "wb") as f:
         pickle.dump(output_spectra, f)
 
         
