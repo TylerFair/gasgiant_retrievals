@@ -27,7 +27,7 @@ class Profile:
             self.set_parametric(
                 params_dict["T0"], 10**params_dict["log_P1"],
                 params_dict["alpha1"], params_dict["alpha2"],
-                10**params_dict["log_P3"], params_dict["T3"])
+                10**params_dict["log_P2"], 10**params_dict["log_P3"])
         elif profile_type == "radiative_solution":
             self.set_from_radiative_solution(**params_dict)
         else:
