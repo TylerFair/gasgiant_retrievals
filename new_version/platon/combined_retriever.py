@@ -625,7 +625,7 @@ class CombinedRetriever:
         
 
     @staticmethod
-    def get_default_fit_info(Rs, Mp, Rp, T=None, logZ=0, CO_ratio=0.53, log_CH4_mult=0,
+    def get_default_fit_info(Rs, Mp, Rp, logZ=0, CO_ratio=0.53, log_CH4_mult=0,
                              free_retrieval=False,
                              log_cloudtop_P=np.inf, log_scatt_factor=0,
                              scatt_slope=4, error_multiple=1, T_star=None,
