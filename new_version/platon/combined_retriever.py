@@ -89,6 +89,7 @@ class CombinedRetriever:
                 raise ValueError(
                     "low_lim for {} is higher than high_lim".format(name))
 
+            '''
             for lim in [this_param.low_lim, this_param.high_lim]:
                 this_param.best_guess = lim
                 calculator._validate_params(
@@ -96,7 +97,7 @@ class CombinedRetriever:
                     fit_info._get("logZ"),
                     fit_info._get("CO_ratio"),
                     10**fit_info._get("log_cloudtop_P"))
-
+            '''
     @staticmethod
     def convert_clr_to_vmr(clrs):
         clr_bkg = -np.sum(clrs)
