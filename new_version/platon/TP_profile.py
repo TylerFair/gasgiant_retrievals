@@ -42,24 +42,25 @@ class Profile:
     def set_isothermal(self, T_day):
         self.temperatures = xp.ones(len(self.pressures)) * T_day
 
-    def set_parametric(self, T0, P1, alpha1, alpha2, P3, T3):
+    def set_parametric(self, T0, P1, alpha1, alpha2, P2, P3):
         '''Parametric model from https://arxiv.org/pdf/0910.1347.pdf'''
         P0 = xp.amin(self.pressures)
 
-        ln_P2 = alpha2**2*(T0+xp.log(P1/P0)**2/alpha1**2 - T3) - xp.log(P1)**2 + xp.log(P3)**2
-        ln_P2 /= 2 * xp.log(P3/P1)
-        P2 = xp.exp(ln_P2)
-        T2 = T3 - xp.log(P3/P2)**2/alpha2**2
+        T1 = T0 + xp.power(xp.log(P1/P0)/alpha1, 2.0)
+        T2 = T1 - xp.power(xp.log(P1/P2)/alpha2, 2.0)
+        T3 = T2 + xp.power(xp.log(P3/P2)/alpha2, 2.0) 
+  
 
         self.temperatures = xp.zeros(len(self.pressures))
         for i, P in enumerate(self.pressures):
             if P < P1:
-                self.temperatures[i] = T0 + xp.log(P/P0)**2 / alpha1**2
+                self.temperatures[i] = T0 + xp.power(xp.log(P/P0)/alpha1, 2.0)
             elif P < P3:
-                self.temperatures[i] = T2 + xp.log(P/P2)**2 / alpha2**2
+                self.temperatures[i] = T2 + xp.power(xp.log(P/P2)/alpha2, 2.0)
             else:
                 self.temperatures[i] = T3
-        return P2, T2
+        return T2, T3
+
 
     def set_from_opacity(self, T_irr, info_dict, visible_cutoff=0.8e-6, T_int=100):
         wavelengths = xp.array(info_dict["unbinned_wavelengths"])
