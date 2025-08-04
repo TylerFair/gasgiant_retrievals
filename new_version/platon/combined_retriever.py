@@ -494,7 +494,7 @@ class CombinedRetriever:
         sampler = NestedSampler(dynesty_ln_like, transform_prior, num_dim, bound='multi', nlive=nlive, **dynesty_kwargs)
         sampler.run_nested(maxiter=maxiter, maxcall=maxcall)
         result = CustomDynestyResult(sampler.results)
-        result.logp = result.logl + np.array([fit_info._ln_prior(params) for params in result.samples])
+        result.logp = result.logl #+ np.array([fit_info._ln_prior(params) for params in result.samples])
         best_params_arr = result.samples[np.argmax(result.logp)]
 
         normalized_weights = np.exp(result.logwt - np.max(result.logwt))
