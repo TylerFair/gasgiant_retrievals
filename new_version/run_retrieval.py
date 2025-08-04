@@ -50,7 +50,7 @@ elif profile_type == 'parametric':
         logZ=None, CO_ratio=None, fit_vmr=True,
         log_cloudtop_P=3, log_scatt_factor=0., scatt_slope=4, scattering_ref_wavelength=1e-6,  # cloudtop pressure , haze factor, haze slope, haze ref wave
         n=None, log_k=-np.inf, # no mie scattering
-        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, #cloud_cov_frac=0.8,
+        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, cloud_cov_frac=0.8,
         profile_type=profile_type, 
         T0=T_eq, 
         log_P1=2,           
@@ -80,7 +80,7 @@ fit_info.add_uniform_fit_param("T_spot", 0.5 * T_star, 1.5 * T_star)
 fit_info.add_uniform_fit_param("spot_cov_frac", 0, 0.2)
 fit_info.add_gaussian_fit_param("T_star", 80) 
 
-#fit_info.add_uniform_fit_param("cloud_cov_frac", 0, 1)
+fit_info.add_uniform_fit_param("cloud_cov_frac", 0, 1)
 
 # SiO2 doesnt exist 
 #general_gases = ["H2O", "CO", "CO2", "CH4", "HCN", "NH3", "H2S", "Na", "K", "SO2", "SiO","TiO", "VO", "C2H2", "H2-He"]
