@@ -67,7 +67,7 @@ def create_stellar_grid_data(logg, feh):
     output_spectra['temperatures'] = np.array(temps)
     output_spectra['spectra'] = np.array(spectra)
 
-    with open("stellar_spectra.pkl", "wb") as f:
+    with open("data/stellar_spectra.pkl", "wb") as f:
         pickle.dump(output_spectra, f)
 
         
