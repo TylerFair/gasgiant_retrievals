@@ -629,6 +629,7 @@ class CombinedRetriever:
             fit_info, divisors, new_labels)
 
         retrieval_result.random_transit_depths = []
+        retrieval_result.random_binned_transit_depths = []
         retrieval_result.random_eclipse_depths = []
         retrieval_result.random_TP_profiles = []
         retrieval_result.pointwise_lnlikes = []
@@ -639,6 +640,8 @@ class CombinedRetriever:
                 eclipse_depths, eclipse_errors, ret_best_fit=True)
             if transit_depths is not None:                                                
                 retrieval_result.random_transit_depths.append(transit_info["unbinned_depths"] * transit_info["unbinned_correction_factors"])
+                retrieval_result.random_binned_transit_depths.append(transit_info["binned_depths"])
+                retrieval_result.random_TP_profiles.append(np.array([transit_info["P_profile"], transit_info["T_profile"]]))
             if eclipse_depths is not None:
                 retrieval_result.random_eclipse_depths.append(eclipse_info["unbinned_eclipse_depths"])
                 retrieval_result.random_TP_profiles.append(np.array([eclipse_info["P_profile"], eclipse_info["T_profile"]]))
