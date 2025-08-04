@@ -25,13 +25,14 @@ logg = 4.5
 feh = 0.0 
 #create custom stellar grid 
 # then do export PYSYN_CDBS=/Users/tyler/Downloads/SRA/platon/platon/data/grp/redcat/trds/ (put the donwloaded models in data )
-#generate_stellar_grid = False
+# or export PYSYN_CDBS=/hard_disk/platon/platon/data/grp/redcat/trds/
+generate_stellar_grid = True
 
-#if generate_stellar_grid:
-#    from platon.create_custom_stellar_grid import create_stellar_grid_data
-#    create_stellar_grid_data(logg, feh)
+if generate_stellar_grid:
+    from platon.create_custom_stellar_spectrum import create_stellar_grid_data
+    create_stellar_grid_data(logg, feh)
 
-profile_type = 'isothermal'  # 'isothermal', 'parametric'
+profile_type = 'parametric'  # 'isothermal', 'parametric'
 
 retriever = CombinedRetriever()
 
@@ -41,7 +42,7 @@ if profile_type == 'isothermal':
         logZ=None, CO_ratio=None, fit_vmr=True,
         log_cloudtop_P=3, log_scatt_factor=0., scatt_slope=4, scattering_ref_wavelength=1e-6,  # cloudtop pressure , haze factor, haze slope, haze ref wave
         n=None, log_k=-np.inf, # no mie scattering
-        T_star=T_star, T_spot=4300, spot_cov_frac=0.05,
+        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, cloud_cov_frac=0.8,
         profile_type=profile_type,
         T=T_eq)
 elif profile_type == 'parametric':
@@ -50,7 +51,7 @@ elif profile_type == 'parametric':
         logZ=None, CO_ratio=None, fit_vmr=True,
         log_cloudtop_P=3, log_scatt_factor=0., scatt_slope=4, scattering_ref_wavelength=1e-6,  # cloudtop pressure , haze factor, haze slope, haze ref wave
         n=None, log_k=-np.inf, # no mie scattering
-        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, cloud_cov_frac=0.8,
+        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, cloud_cov_frac=0.8, # DO NOT DEL CLOUD COV FRAC 
         profile_type=profile_type, 
         T0=T_eq, 
         log_P1=2,           
