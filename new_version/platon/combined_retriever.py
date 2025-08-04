@@ -177,7 +177,7 @@ class CombinedRetriever:
                 if np.any(np.isnan(t_p_profile.temperatures)):
                     raise AtmosphereError("Invalid T/P profile")
                 
-                if float(cloud_cov_frac) != 0.0: 
+                if float(cloud_cov_frac) != 1.0: 
                     transit_wavelengths, calculated_transit_depths_cloudy, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
                         custom_abundances=None,
@@ -190,12 +190,21 @@ class CombinedRetriever:
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
                         custom_abundances=None,
                         scattering_factor=scatt_factor, scattering_slope=scatt_slope,
-                        cloudtop_pressure=cloudtop_P, T_star=T_star,
+                        cloudtop_pressure=np.inf, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                         frac_scale_height=frac_scale_height, number_density=number_density,
                         part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     calculated_transit_depths = cloud_cov_frac * calculated_transit_depths_cloudy + (1 - cloud_cov_frac) * calculated_transit_depths_clear
-
+                else:
+                    transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
+                        t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
+                        custom_abundances=None,
+                        scattering_factor=scatt_factor, scattering_slope=scatt_slope,
+                        cloudtop_pressure=cloudtop_P, T_star=T_star,
+                        T_spot=T_spot, spot_cov_frac=spot_cov_frac,
+                        frac_scale_height=frac_scale_height, number_density=number_density,
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
+                    
                 calculated_transit_depths[params_dict["offset_start"] : params_dict["offset_end"]] += params_dict["offset_transit"]
                 residuals = calculated_transit_depths - measured_transit_depths
                 scaled_errors = error_multiple * measured_transit_errors
@@ -645,7 +654,7 @@ class CombinedRetriever:
                              free_retrieval=False,
                              log_cloudtop_P=np.inf, log_scatt_factor=0,
                              scatt_slope=4, error_multiple=1, T_star=None,
-                             T_spot=None, spot_cov_frac=None, cloud_cov_frac=0,
+                             T_spot=None, spot_cov_frac=None, cloud_cov_frac=1.0,
                              frac_scale_height=1,
                              log_number_density=-np.inf, log_part_size=-6,
                              n=None, log_k=-np.inf,
