@@ -124,8 +124,8 @@ class TransitDepthCalculator:
         self.atm._validate_params(T, logZ, CO_ratio, cloudtop_pressure)
         
     
-    def compute_depths(self, star_radius, planet_mass, planet_radius,
-                       temperature, logZ=0, CO_ratio=0.53, CH4_mult=1,
+    def compute_depths(self, t_p_profile, star_radius, planet_mass, planet_radius,
+                       logZ=0, CO_ratio=0.53, CH4_mult=1,
                        gases=None, vmrs=None,
                        add_gas_absorption=True, add_H_minus_absorption=False,
                        add_scattering=True, scattering_factor=1,
@@ -143,14 +143,14 @@ class TransitDepthCalculator:
 
         Parameters
         ----------
+        t_p_profile : float
+            Profile object
         star_radius : float
             Radius of the star
         planet_mass : float
             Mass of the planet, in kg
         planet_radius : float
             Radius of the planet at 100,000 Pa. Must be in metres.
-        temperature : float
-            Temperature of the isothermal atmosphere, in Kelvin
         logZ : float
             Base-10 logarithm of the metallicity, in solar units
         CO_ratio : float, optional
@@ -258,18 +258,20 @@ class TransitDepthCalculator:
                 raise ValueError("Must specify both custom_T_profile and "
                                  "custom_P_profile, and the two must have the"
                                  " same length")
-            if temperature is not None:
-                raise ValueError(
-                    "Cannot specify both temperature and custom T profile")
+            #if temperature is not None:
+            #    raise ValueError(
+            #        "Cannot specify both temperature and custom T profile")
             
             P_profile = custom_P_profile
             T_profile = custom_T_profile
         else:
-            P_profile = xp.logspace(
-                xp.log10(self.atm.P_grid[0]),
-                xp.log10(self.atm.P_grid[-1]),
-                NUM_LAYERS)
-            T_profile = xp.ones(len(P_profile)) * temperature
+            #P_profile = xp.logspace(
+            #    xp.log10(self.atm.P_grid[0]),
+            #    xp.log10(self.atm.P_grid[-1]),
+            #    NUM_LAYERS)
+            #T_profile = xp.ones(len(P_profile)) * temperature
+            P_profile = t_p_profile.pressures
+            T_profile = t_p_profile.temperatures 
 
         atm_info = self.atm.compute_params(
             star_radius, planet_mass, planet_radius, P_profile, T_profile,
