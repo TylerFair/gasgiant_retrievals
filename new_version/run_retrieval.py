@@ -22,10 +22,10 @@ Rp = 0.995 * R_jup
 T_eq = 852  
 T_star = 4803
 logg = 4.5
-feh = 0.0 
+feh = 0.1
 #create custom stellar grid 
 # then do export PYSYN_CDBS=/Users/tyler/Downloads/SRA/platon/platon/data/grp/redcat/trds/ (put the donwloaded models in data )
-# or export PYSYN_CDBS=/hard_disk/platon/platon/data/grp/redcat/trds/
+# or export PYSYN_CDBS=/home/tyler/hard_disk/platon/platon/data/grp/redcat/trds/
 generate_stellar_grid = True
 
 if generate_stellar_grid:
