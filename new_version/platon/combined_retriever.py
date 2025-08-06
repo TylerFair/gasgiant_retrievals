@@ -189,11 +189,11 @@ class CombinedRetriever:
                     transit_wavelengths, calculated_transit_depths_clear, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
                         custom_abundances=None,
-                        scattering_factor=scatt_factor, scattering_slope=scatt_slope,
+                        scattering_factor=1, scattering_slope=4,
                         cloudtop_pressure=np.inf, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
-                        frac_scale_height=frac_scale_height, number_density=number_density,
-                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
+                        frac_scale_height=frac_scale_height, number_density=0,
+                        part_size=part_size, ri=None, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     calculated_transit_depths = cloud_cov_frac * calculated_transit_depths_cloudy + (1 - cloud_cov_frac) * calculated_transit_depths_clear
                 else:
                     transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
