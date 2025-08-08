@@ -634,13 +634,20 @@ class CombinedRetriever:
         retrieval_result.random_TP_profiles = []
         retrieval_result.pointwise_lnlikes = []
         for params in equal_samples[:num_final_samples]:
-            _, transit_info, _, eclipse_info = self._ln_like(
-                params, transit_calc, eclipse_calc, fit_info,
-                transit_depths, transit_errors,
-                eclipse_depths, eclipse_errors, ret_best_fit=True)
-            if transit_depths is not None:                                                
+            #_, transit_info, _, eclipse_info = self._ln_like(
+            #    params, transit_calc, eclipse_calc, fit_info,
+            #    transit_depths, transit_errors,
+            #    eclipse_depths, eclipse_errors, ret_best_fit=True)
+            ret = self._ln_like(
+                    params, transit_calc, eclipse_calc, fit_info,
+                    transit_depths, transit_errors,
+                    eclipse_depths, eclipse_errors, ret_best_fit=True)
+            if ret == -np.inf:
+                continue
+            binned_transit_depths, transit_info, _, eclipse_info = ret
+            if transit_depths is not None:
                 retrieval_result.random_transit_depths.append(transit_info["unbinned_depths"] * transit_info["unbinned_correction_factors"])
-                retrieval_result.random_binned_transit_depths.append(transit_info["binned_depths"])
+                retrieval_result.random_binned_transit_depths.append(binned_transit_depths)
                 retrieval_result.random_TP_profiles.append(np.array([transit_info["P_profile"], transit_info["T_profile"]]))
             if eclipse_depths is not None:
                 retrieval_result.random_eclipse_depths.append(eclipse_info["unbinned_eclipse_depths"])
