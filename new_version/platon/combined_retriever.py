@@ -652,11 +652,22 @@ class CombinedRetriever:
             if eclipse_depths is not None:
                 retrieval_result.random_eclipse_depths.append(eclipse_info["unbinned_eclipse_depths"])
                 retrieval_result.random_TP_profiles.append(np.array([eclipse_info["P_profile"], eclipse_info["T_profile"]]))
-            retrieval_result.pointwise_lnlikes.append(self.params_to_lnlike[tuple(params)])
+            #retrieval_result.pointwise_lnlikes.append(self.params_to_lnlike[tuple(params)])
+            lnlike_pp = self._ln_like(
+            params, transit_calc, eclipse_calc, fit_info,
+            transit_depths, transit_errors,
+            eclipse_depths, eclipse_errors,
+            lnlike_per_point=True
+            )
+            if np.isscalar(lnlike_pp):  # -np.inf
+                continue
+            retrieval_result.pointwise_lnlikes.append(lnlike_pp)
 
         #Calculate LOO-CV scores
         retrieval_result.loo_total, retrieval_result.loos, retrieval_result.loo_ks = psisloo(np.array(retrieval_result.pointwise_lnlikes))
         return retrieval_result
+
+
         
 
     @staticmethod
