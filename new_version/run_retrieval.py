@@ -74,9 +74,9 @@ elif profile_type == 'parametric':
     fit_info.add_uniform_fit_param('alpha2', 0.02, 2)
 
 fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8) 
-fit_info.add_uniform_fit_param("log_scatt_factor", -2, 5) # investigate -3, 3; -4, 10
+fit_info.add_uniform_fit_param("log_scatt_factor", -4, 8) # investigate -3, 3; -4, 10
 
-fit_info.add_uniform_fit_param("scatt_slope", 0, 12) # investigate 2, 5; -2, 20
+fit_info.add_uniform_fit_param("scatt_slope", -2, 20) # investigate 2, 5; -2, 20
 fit_info.add_uniform_fit_param("T_spot", 0.5 * T_star, 1.5 * T_star)  
 fit_info.add_uniform_fit_param("spot_cov_frac", 0, 0.2)
 fit_info.add_gaussian_fit_param("T_star", 80) 
