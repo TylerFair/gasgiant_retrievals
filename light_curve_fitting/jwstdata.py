@@ -88,34 +88,25 @@ def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bin
     }
 
 
-def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg):
+def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file):
     """Main function to process spectroscopy data."""
-    
     # Unpack data based on instrument
-    if instrument == 'NIRSPEC/G395H':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M':
         nrs = cfg['nrs']
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        infile = os.path.join(input_dir, f"TOI241_NIRSPEC_FULLRES_AP16.fits")
-        #wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_nirspec_exoted(
-        #    file_pattern
-        #)
-        #infile = os.path.join(input_dir, f'TOI-1130_nrs{nrs}_box_spectra_fullres.fits')
-        wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_nirspec_exoted(infile)
+        wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_nirspec_exoted(fits_file)
         mini_instrument = nrs
-        
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
-        infile = os.path.join(input_dir, f'HAT-P-11_box_spectra_fullres.fits')
         wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_niriss_exoted(
-            infile, order, planet_str, output_dir, 1
+            fits_file, order, planet_str, output_dir, 1
         )
         mini_instrument = order
     elif instrument == 'MIRI/LRS':
-        infile = os.path.join(input_dir, f'HD106315c_box_spectra_fullres.fits')
         wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_miri_exoted(
-                infile)
+                fits_file)
         mini_instrument = '' 
     else:
         raise NotImplementedError(f'Instrument {instrument} not implemented yet')
