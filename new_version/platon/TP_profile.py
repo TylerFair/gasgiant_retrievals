@@ -46,17 +46,17 @@ class Profile:
         '''Parametric model from https://arxiv.org/pdf/0910.1347.pdf'''
         P0 = xp.amin(self.pressures)
 
-        T1 = T0 + xp.power(xp.log(P1/P0)/alpha1, 2.0)
-        T2 = T1 - xp.power(xp.log(P1/P2)/alpha2, 2.0)
-        T3 = T2 + xp.power(xp.log(P3/P2)/alpha2, 2.0) 
+        T1 = T0 + xp.power(xp.log10(P1/P0)/alpha1, 2.0)
+        T2 = T1 - xp.power(xp.log10(P1/P2)/alpha2, 2.0)
+        T3 = T2 + xp.power(xp.log10(P3/P2)/alpha2, 2.0) 
   
 
         self.temperatures = xp.zeros(len(self.pressures))
         for i, P in enumerate(self.pressures):
             if P < P1:
-                self.temperatures[i] = T0 + xp.power(xp.log(P/P0)/alpha1, 2.0)
+                self.temperatures[i] = T0 + xp.power(xp.log10(P/P0)/alpha1, 2.0)
             elif P < P3:
-                self.temperatures[i] = T2 + xp.power(xp.log(P/P2)/alpha2, 2.0)
+                self.temperatures[i] = T2 + xp.power(xp.log10(P/P2)/alpha2, 2.0)
             else:
                 self.temperatures[i] = T3
         return T2, T3
