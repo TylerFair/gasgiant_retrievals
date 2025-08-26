@@ -421,7 +421,8 @@ def main():
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
     need_lowres = flags.get('need_lowres', True)
-
+    mask_start = flags.get('mask_start', None)
+    mask_end = flags.get('mask_end', None)
     # binning nm seperation
     high_resolution_bins = bins.get('high', 1)
     low_resolution_bins = bins.get('low', 100)
@@ -454,7 +455,7 @@ def main():
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
     if not os.path.exists(spectro_data_file):
-        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg)
+        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, mask_start, mask_end)
         data.save(spectro_data_file)
         print("Shapes:")
         print(f"Time: {data.time.shape}")
