@@ -31,6 +31,16 @@ pd.set_option('display.max_rows', None)
 # ---------------------
 # Model Functions
 # ---------------------
+DTYPE = jnp.float64
+
+def _to_f64(x):
+    if isinstance(x, (np.ndarray, jnp.ndarray)) and jnp.issubdtype(jnp.asarray(x).dtype, jnp.floating):
+        return jnp.asarray(x, DTYPE)
+    return x
+
+def _tree_to_f64(tree):
+    return jax.tree_util.tree_map(_to_f64, tree)
+    
 def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
@@ -175,7 +185,17 @@ def whitelight_model(t, yerr, y=None, prior_params=None, detrend_type='linear'):
 
 def get_samples(model, key, t, yerr, indiv_y, init_params, trend_fixed=None, ld_interpolated=None, ld_fixed=None):
     """Runs MCMC using NUTS to get posterior samples."""
-
+    t          = _to_f64(t)
+    yerr       = _to_f64(yerr)
+    indiv_y    = _to_f64(indiv_y)
+    init_params = _tree_to_f64(init_params)
+    if trend_fixed is not None:
+        trend_fixed = _to_f64(trend_fixed)
+    if ld_interpolated is not None:
+        ld_interpolated = _to_f64(ld_interpolated)
+    if ld_fixed is not None:
+        ld_fixed = _to_f64(ld_fixed)
+        
     mcmc = numpyro.infer.MCMC(
         numpyro.infer.NUTS(
             model,
