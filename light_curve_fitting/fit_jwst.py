@@ -401,7 +401,7 @@ def main():
         print(f"Error: No Planet Folder detected. Need directory: {input_dir}")
         sys.exit(1)
     output_dir = os.path.join(base_path, cfg.get('output_dir', planet_str + '_RESULTS'))
-    fits_file = cfg.get('fits_file')
+    fits_file = os.path.join(input_dir, cfg.get('fits_file'))
     if fits_file is None:
         print("Error: `fits_file` not specified in the config file.")
         sys.exit(1)
@@ -455,7 +455,7 @@ def main():
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
     if not os.path.exists(spectro_data_file):
-        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, mask_start, mask_end)
+        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
         data.save(spectro_data_file)
         print("Shapes:")
         print(f"Time: {data.time.shape}")
