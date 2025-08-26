@@ -139,7 +139,12 @@ def unpack_nirspec_exoted(infile):
     wavelength = wave
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
-    
+
+    if quick_whitelight: # Never called but manually useable
+        wl_flux = np.nanmean(fluxcube, axis=1) 
+        plt.scatter(t, wl_flux, c='k', s=1)
+        plt.show()
+        
     return wavelength, t, fluxcube
 
 def unpack_miri_exoted(infile):
