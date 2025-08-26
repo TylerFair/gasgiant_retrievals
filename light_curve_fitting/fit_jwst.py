@@ -852,19 +852,19 @@ def main():
                             f"{output_dir}/24_{instrument_full_str}_{low_resolution_bins}bins_spectrum.png")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{low_resolution_bins}bins.csv")
 
-        oot_mask_lr = (time_lr < T0_BASE - 1 * DURATION_BASE) | (time_lr > T0_BASE + 1 * DURATION_BASE)
+        oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)
 
         def calc_rms(y_bin):
             baseline = y_bin[oot_mask_lr]
-            return jnp.sqrt(jnp.mean(jnp.square(jnp.diff(baseline)))) / jnp.sqrt(2.0)
+            return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
         rms_vals = jax.vmap(calc_rms)(flux_lr)
 
         plt.figure(figsize=(8,5))
         plt.scatter(data.wavelengths_lr, rms_vals, c='k')
         plt.xlabel("Wavelength (μm)")
-        plt.ylabel("Baseline RMS")
-        plt.title("Out‑of‑Transit RMS vs Wavelength")
+        plt.ylabel("Per Wavelength Noise (ppm)")
+       # plt.title("Out‑of‑Transit RMS vs Wavelength")
         plt.tight_layout()
         plt.savefig(f'{output_dir}/24_{instrument_full_str}_{low_resolution_bins}bins_rms.png')
         plt.close()
@@ -1026,7 +1026,7 @@ def main():
 
     def calc_rms(y_bin):
         baseline = y_bin[oot_mask]
-        return jnp.sqrt(jnp.mean(jnp.square(jnp.diff(baseline)))) / jnp.sqrt(2.0)
+        return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
 
