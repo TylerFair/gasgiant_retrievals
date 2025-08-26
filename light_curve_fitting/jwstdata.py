@@ -96,22 +96,18 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_nirspec_exoted(fits_file)
+        wavelengths, time, flux_unbinned = new_unpack.unpack_nirspec_exoted(fits_file)
         mini_instrument = nrs
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
-        wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_niriss_exoted(
-            fits_file, order, planet_str, output_dir, 1
-        )
+        wavelengths, time, flux_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order)
         mini_instrument = order
     elif instrument == 'MIRI/LRS':
-        wavelengths, time, flux_unbinned, *_ = new_unpack.unpack_miri_exoted(
-                fits_file)
+        wavelengths, time, flux_unbinned = new_unpack.unpack_miri_exoted(fits_file)
         mini_instrument = '' 
     else:
         raise NotImplementedError(f'Instrument {instrument} not implemented yet')
     
-    # Clean up data
     wavelengths = np.array(wavelengths)
     time = np.array(time)
     flux_unbinned = np.array(flux_unbinned)  # Shape: (n_time, n_wavelength)
@@ -121,6 +117,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wavelengths = wavelengths[~nanmask]
     flux_unbinned = flux_unbinned[:, ~nanmask]
 
+    # Apply time masking criteria (useful for spot-crossings)
     if mask_end is not None:
         if mask_start is None:
             raise print('Time mask for end time supplied but missing start time! Please give mask_start')
@@ -147,9 +144,9 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     if instrument == 'MIRI/LRS':
         wl_flux = jnp.nanmedian(flux_unbinned, axis=1)
     else:
-        wl_flux = jnp.nanmean(flux_unbinned, axis=1)  
+        wl_flux = jnp.nanmean(flux_unbinned, axis=1)   ##TODO: Is there a difference between mean and median for others?
     wl_flux_err = 1.4826 * jnp.nanmedian(jnp.abs(wl_flux - jnp.nanmedian(wl_flux)))
-    # Create SpectroData object with clean attribute names
+
     return SpectroData(
         time=jnp.array(time),
         wavelengths_unbinned=jnp.array(wavelengths),
