@@ -127,9 +127,16 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     if mask_start is not None:
         if mask_end is None:
             raise print('Time mask for start time supplied but missing end time! Please give mask_end')
-        timemask = (time >= mask_start) & (time <= mask_end)
-        time = time[~timemask]
-        flux_unbinned = flux_unbinned[~timemask, :]
+        if isinstance(mask_start, (list, tuple)) and len(mask_start) > 1:
+            timemask = np.zeros_like(time, dtype=bool)
+            for start, end in zip(mask_start, mask_end):
+                timemask |= (time >= start) & (time <= end)
+            time = time[~timemask]
+            flux_unbinned = flux_unbinned[~timemask, :]
+        else: 
+            timemask = (time >= mask_start) & (time <= mask_end)
+            time = time[~timemask]
+            flux_unbinned = flux_unbinned[~timemask, :]
     
     # Do all the binning
     binned_data = bin_spectroscopy_data(
