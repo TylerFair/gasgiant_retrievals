@@ -92,7 +92,7 @@ def unpack_nirspec_eureka(file_pattern, nrs, planet_str, output_dir, bins_wanted
     return wavelengths, t, indiv_y, None
 
 
-def unpack_niriss_exoted(infile, order, planet_str, output_dir, bins_wanted=50):    
+def unpack_niriss_exoted(infile, order):    
 
     bjd = fits.getdata(infile, 9)
     wave = fits.getdata(infile, 1 + 4 * (order - 1))
@@ -116,7 +116,7 @@ def unpack_niriss_exoted(infile, order, planet_str, output_dir, bins_wanted=50):
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     
-    return wavelength, t, fluxcube, None
+    return wavelength, t, fluxcube
 
 def unpack_nirspec_exoted(infile):    
 
@@ -140,7 +140,7 @@ def unpack_nirspec_exoted(infile):
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     
-    return wavelength, t, fluxcube, None
+    return wavelength, t, fluxcube
 
 def unpack_miri_exoted(infile):
 
@@ -155,7 +155,7 @@ def unpack_miri_exoted(infile):
     wave, wave_err = wave[ii], wave_err[ii]
     fluxcube = fluxcube[:,ii]
     
-    base = -1 - np.arange(200).astype(int) # np.conicatenate([np.arange(100), np.arange(100)-100]).astype(int)
+    base = -1 - np.arange(200).astype(int)
 
     median_flux = np.nanmedian(fluxcube[base], axis=0)
 
@@ -164,4 +164,4 @@ def unpack_miri_exoted(infile):
     wavelength = wave
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
-    return wavelength, t, fluxcube, None
+    return wavelength, t, fluxcube
