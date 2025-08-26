@@ -28,6 +28,10 @@ resolution_bins:
   low:  40 # nm resolution to bin spectroscopic curves [optional: not triggered if not low-res]
 
 flags:
+  detrending_type: 'linear'  # Type of detrending: 
+                                # linear = offset + linear with time term,
+                                # gp = whitelight gp on CPU which is subtracted from multiwavelength, and then linear on GPU, 
+                                # explinear = linear with Aexp(-t/tau) ramp. 
   interpolate_trend: False # Option to interpolate trend coefficients from low res to high res | defaults to False
   interpolate_ld: True # Option to interpolate LD coefficients from low res ot high res | defaults to false
   fix_ld: False
