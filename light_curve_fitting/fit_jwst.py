@@ -62,10 +62,6 @@ def compute_lc_from_params(params, t, detrend_type='linear'):
     elif detrend_type == 'explinear':
         trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-t/params['tau'])
     elif detrend_type == 'gp':
-        # For the GP case, the trend is handled separately by the GP model itself.
-        # The mean function for the GP will be just the transit model.
-        # The multi-wavelength fit will have the GP trend divided out.
-        # so we can just return the transit model here.
         return lc_transit
     else:
         raise ValueError(f"Unknown detrend_type: {detrend_type}")
@@ -209,8 +205,8 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, trend_fixed=None, ld_
         jit_model_args=True
     )
     mcmc.run(key, t, yerr, y=indiv_y, trend_fixed=trend_fixed,ld_interpolated=ld_interpolated, ld_fixed=ld_fixed)
-    inf_data = az.from_numpyro(mcmc)
-    print(az.summary(inf_data, var_names=None, round_to=6))
+    #inf_data = az.from_numpyro(mcmc)
+    #print(az.summary(inf_data, var_names=None, round_to=6))
 
     return mcmc.get_samples()
 
@@ -455,7 +451,7 @@ def main():
     )
     mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
-    spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data.pkl'
+    spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
     if not os.path.exists(spectro_data_file):
         data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg)
@@ -473,7 +469,9 @@ def main():
     print(f"Low res: {data.wavelengths_lr.shape}, {data.flux_lr.shape}")
     print(f"High res: {data.wavelengths_hr.shape}, {data.flux_hr.shape}, {data.flux_err_hr.shape}")
     plt.scatter(data.wl_time, data.wl_flux)
-    plt.show()
+    plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
+    plt.close()
+    
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
     if instrument == 'NIRSPEC/G395H':
