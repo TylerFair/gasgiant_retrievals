@@ -88,7 +88,7 @@ def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bin
     }
 
 
-def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file):
+def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None):
     """Main function to process spectroscopy data."""
     # Unpack data based on instrument
     if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M':
@@ -120,6 +120,16 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     nanmask = np.all(np.isnan(flux_unbinned), axis=0)
     wavelengths = wavelengths[~nanmask]
     flux_unbinned = flux_unbinned[:, ~nanmask]
+
+    if mask_end is not None:
+        if mask_start is None:
+            raise print('Time mask for end time supplied but missing start time! Please give mask_start')
+    if mask_start is not None:
+        if mask_end is None:
+            raise print('Time mask for start time supplied but missing end time! Please give mask_end')
+        timemask = (time >= mask_start) & (time <= mask_end)
+        time = time[~timemask]
+        flux_unbinned = flux_unbinned[~timemask, :]
     
     # Do all the binning
     binned_data = bin_spectroscopy_data(
