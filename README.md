@@ -8,3 +8,9 @@ JWST Flux cube -> Retrieval fitting kit.
   this currently is supported for the exoTEDRF reduction (https://github.com/radicamc/exoTEDRF), but also has
   manually swappable functions for Eureka (https://github.com/kevin218/Eureka). It's also easy to hack your own fluxcube unpacking
   function following these ones. The full code is controlled by a .YAML file. 
+
+Works In Progress:
+- Make retrieval faster for most high-dimensional cases
+- Add native multiple instrument offset support
+- Clean up high-memory demand of fitting script by partitioning runs (which will introduce minor overhead but make it useable for
+  small GPU/RAM machines)
