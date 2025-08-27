@@ -1,12 +1,10 @@
-This directory contains all of my scripts for each planet and each retrieval
+JWST Flux cube -> Retrieval fitting kit.
 
-Lablled as : 
+- new_version directory contains PLATON atmospheric retrieval code and modified source files for custom stellar template spectra,
+    paramterized TP profiles in transmission, Transit Light Source (TLS), and partial cloud coverage. The retrieval is currently slow!!
+    And doesn't support multiple instrument offsets, but I'll be improving these shortly.
 
-planet(free or chemeq)_(cloudshazes, clouds, hazes or nocloudshazes)_(spots or nospots)_(anything fixed that is different to normal)
-
-free = ["Na", "K", "H2O", "CO", "CO2", "CH4", "HCN", "NH3", "H2-He"]
-
-clouds = log_cloudtop_P
-hazes = log_scatt_factor, scatt_slope
-spots = T_spot, spot_cov_frac
-
+- light_curve_fitting directory contains the modeling of the whitelight curve and multiwavelength light curves given a fluxcube,
+  this currently is supported for the exoTEDRF reduction (https://github.com/radicamc/exoTEDRF), but also has
+  manually swappable functions for Eureka (https://github.com/kevin218/Eureka). It's also easy to hack your own fluxcube unpacking
+  function following these ones. The full code is controlled by a .YAML file. 
