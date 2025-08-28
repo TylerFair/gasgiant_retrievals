@@ -525,7 +525,7 @@ def main():
         
         mcmc = numpyro.infer.MCMC(
             numpyro.infer.NUTS(
-                whitelight_model_for_run
+                whitelight_model_for_run,
              #   partial(whitelight_model, detrend_type=detrending_type),
                 regularize_mass_matrix=False,
                 init_strategy=numpyro.infer.init_to_value(values=soln),
