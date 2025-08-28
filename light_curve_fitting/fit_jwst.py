@@ -656,6 +656,12 @@ def main():
             trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
             detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1.0)
 
+        plt.scatter(data.wl_time[~wl_mad_mask, detrended_flux, c='k', s=1)
+        plt.title(f'WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+        plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
+        plt.show()
+        plt.close()
+        
         detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
         detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
         np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
