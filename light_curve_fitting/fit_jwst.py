@@ -500,7 +500,7 @@ def main():
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order)
 
-    if not stringcheck:
+    if not stringcheck or (detrending_type == 'gp'):
         plt.scatter(data.wl_time, data.wl_flux)
         plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
         plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
