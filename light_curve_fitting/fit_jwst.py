@@ -602,13 +602,16 @@ def main():
 
 
         plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
-        plt.scatter(data.wl_time, data.wl_flux, c='r')
+        plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
+
+        print(jnp.min(wl_transit_model), jnp.max(wl_transit_model))
+        print(jn.pmin(data.wl_flux), jnp.max(data.wl_flux))
        # plt.title('WL GP fit')
         plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
         plt.show()
         plt.close()
 
-        plt.scatter(data.wl_time, wl_residual, c='k')
+        plt.scatter(data.wl_time, wl_residual, c='k', s=2)
         plt.axhline(0, c='r', lw=2)
         plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
         plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
@@ -622,8 +625,8 @@ def main():
 
 
         #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
-        plt.scatter(data.wl_time, data.wl_flux, c='r')
-        plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k')
+        plt.scatter(data.wl_time, data.wl_flux, c='r', s=1)
+        plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=1)
         plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
         plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
         plt.show()
