@@ -23,9 +23,9 @@ input_dir: 'HATP11b_NIRISS' # where the calints files are stored relative to pat
 output_dir: 'ORDER1_LINEAR_INTERPLD' # where the output files are stored relative to path
 fits_file: 'xyz.fits'
 
-resolution_bins:
-  high: 400 # nm resolution to bin spectroscopic curves
-  low:  40 # nm resolution to bin spectroscopic curves [optional: not triggered if not low-res]
+resolution:
+  high: 400 # instrument resolution to bin spectroscopic curves, can be an integer or 'native' for native resolution. 
+  low:  40 #  instrument resolution to bin spectroscopic curves [optional: not triggered if not low-res flag]
 
 flags:
   detrending_type: 'linear'  # Type of detrending: 
