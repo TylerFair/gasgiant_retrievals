@@ -17,12 +17,8 @@ from jaxoplanet.orbits.transit import TransitOrbit
 from exotic_ld import StellarLimbDarkening
 from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmission_spectrum
 import new_unpack
-import numpyro_ext
 import argparse
 import yaml
-import arviz as az
-import corner
-import tinygp
 from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
 #pd.set_option('display.max_columns', None)
@@ -417,6 +413,8 @@ def main():
 
     # flags
     detrending_type = flags.get('detrending_type', 'linear')
+    if detrending_type == 'gp':
+        import tinygp
     interpolate_trend = flags.get('interpolate_trend', False)
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
