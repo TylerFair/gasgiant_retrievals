@@ -707,7 +707,7 @@ def main():
 
     # --- Low-resolution Analysis ---
     if need_lowres_analysis:
-        print(f"\n--- Running Low-Resolution Analysis (Binned every {low_resolution_bins} nm) ---")
+        print(f"\n--- Running Low-Resolution Analysis (Binned to R{low_resolution_bins}) ---")
 
         ##### APPLY OUTLIER MASK HERE ####
         time_lr = jnp.array(data.time[~wl_mad_mask])
@@ -780,7 +780,12 @@ def main():
         )
         
         
-        model_run_args_lr = {}
+        model_run_args_lr = {
+        'mu_duration': DURATION_BASE,
+        'mu_t0': T0_BASE,
+        'mu_depths': DEPTHS_BASE_LR,
+        'PERIOD': PERIOD_FIXED,
+        }
         if lr_ld_mode == 'fixed':
             model_run_args_lr['ld_fixed'] = U_mu_lr
             
@@ -934,7 +939,7 @@ def main():
         plt.savefig(f'{output_dir}/24_{instrument_full_str}_R{low_resolution_bins}_rms.png')
         plt.close()
     # --- High-resolution Analysis ---
-    print(f"\n--- Running High-Resolution Analysis (Binned at {high_resolution_bins} nm) ---")
+    print(f"\n--- Running High-Resolution Analysis (Binned to R{high_resolution_bins}) ---")
 
     ##### APPLY OUTLIER MASK HERE ####
     time_hr = jnp.array(data.time[~wl_mad_mask])
