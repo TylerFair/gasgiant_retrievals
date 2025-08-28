@@ -4,9 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 import pandas as pd 
-import celerite2 
-from celerite2 import terms
-from scipy.optimize import minimize
 import jax 
 import jax.numpy as jnp 
 
