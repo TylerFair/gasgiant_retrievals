@@ -36,8 +36,8 @@ flags:
   interpolate_ld: True # Option to interpolate LD coefficients from low res ot high res | defaults to false
   fix_ld: False
   need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
-  mask_start: None # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
-  mask_end: None  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
+  mask_start: False # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
+  mask_end: False  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
   
 outlier_clip:
   whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
