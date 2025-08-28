@@ -19,6 +19,7 @@ from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmi
 import new_unpack
 import argparse
 import yaml
+import arviz as az 
 from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
 #pd.set_option('display.max_columns', None)
@@ -201,8 +202,7 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, trend_fixed=None, ld_
         jit_model_args=True
     )
     mcmc.run(key, t, yerr, y=indiv_y, trend_fixed=trend_fixed,ld_interpolated=ld_interpolated, ld_fixed=ld_fixed)
-    #inf_data = az.from_numpyro(mcmc)
-    #print(az.summary(inf_data, var_names=None, round_to=6))
+
 
     return mcmc.get_samples()
 
