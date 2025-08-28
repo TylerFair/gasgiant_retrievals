@@ -118,13 +118,13 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     flux_unbinned = flux_unbinned[:, ~nanmask]
 
     # Apply time masking criteria (useful for spot-crossings)
-    if mask_end is not None:
-        if mask_start is None:
+    if mask_end:
+        if mask_start == False:
             raise print('Time mask for end time supplied but missing start time! Please give mask_start')
-    if mask_start is not None:
-        if mask_end is None:
+    if mask_start:
+        if mask_end == False:
             raise print('Time mask for start time supplied but missing end time! Please give mask_end')
-        if isinstance(mask_start, (list, tuple)) and len(mask_start) > 1:
+        if len(mask_start) > 1:
             timemask = np.zeros_like(time, dtype=bool)
             for start, end in zip(mask_start, mask_end):
                 timemask |= (time >= start) & (time <= end)
@@ -137,7 +137,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     
     # Do all the binning
     binned_data = bin_spectroscopy_data(
-        wavelengths, flux_unbinned, cfg['resolution_bins'].get('low'), cfg['resolution_bins'].get('high')
+        wavelengths, flux_unbinned, cfg['resolution'].get('low'), cfg['resolution'].get('high')
     )
     
     # Create white light curve
