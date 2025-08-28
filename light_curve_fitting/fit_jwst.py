@@ -487,8 +487,12 @@ def main():
     print(f"Low res: {data.wavelengths_lr.shape}, {data.flux_lr.shape}")
     print(f"High res: {data.wavelengths_hr.shape}, {data.flux_hr.shape}, {data.flux_err_hr.shape}")
     plt.scatter(data.wl_time, data.wl_flux)
+    plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
     plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
+    keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Y/N)')
     plt.close()
+    if keep_going.lower == 'n':
+        exit()
 
     COMPUTE_KERNELS = {
     'linear': compute_lc_linear,
