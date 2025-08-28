@@ -390,7 +390,7 @@ def main():
 
 
     flags = cfg.get('flags', {})
-    bins = cfg.get('resolution_bins', {})
+    bins = cfg.get('resolution', {})
     outlier_clip = cfg.get('outlier_clip', {})
     planet_str = planet_cfg['name']
 
