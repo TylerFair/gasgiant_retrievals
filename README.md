@@ -10,9 +10,5 @@ JWST Flux cube -> Retrieval fitting kit.
   function following these ones. The full code is controlled by a .YAML file. 
 
 Works In Progress:
-- make resolutiuons more intuitive and allow string for native
--  Clean up high-memory demand of fitting script by partitioning runs (which will introduce minor overhead but make it useable for
-  small GPU/RAM machines)
-- eureka is x1dints unpack exote dis fits
 - Make retrieval faster for most high-dimensional cases
 - Add native multiple instrument offset support
