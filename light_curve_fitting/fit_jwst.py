@@ -973,81 +973,90 @@ def main():
     print(f"High-res: {num_lcs_hr} light curves.")
 
     DEPTHS_BASE_HR = jnp.full(num_lcs_hr, DEPTH_BASE)
+    hr_ld_mode = 'free'
+    if flags.get('interpolate_ld', False):
+        hr_ld_mode = 'interpolated'
+    elif flags.get('fix_ld', False):
+        hr_ld_mode = 'fixed'
+    
+    hr_trend_mode = 'free'
+    if flags.get('interpolate_trend', False):
+        hr_trend_mode = 'fixed'
+    
+    model_run_args_hr = {}
     wl_hr = np.array(data.wavelengths_hr)
-    if interpolate_ld:
-        ld_fixed_hr = None
+    
+    if hr_ld_mode == 'interpolated':
         u1_interp_hr = np.polyval(best_poly_coeffs_u1, wl_hr)
         u2_interp_hr = np.polyval(best_poly_coeffs_u2, wl_hr)
         ld_interpolated_hr = jnp.array(np.column_stack((u1_interp_hr, u2_interp_hr)))
-        print("Using interpolated limb darkening parameters for high-res analysis.")
-        U_mu_hr_init = ld_interpolated_hr
-    elif fix_ld:
-        ld_interpolated_hr = None
+        model_run_args_hr['ld_interpolated'] = ld_interpolated_hr
+        U_mu_hr_init = ld_interpolated_hr 
+        print("HR Run Config: Using INTERPOLATED limb darkening.")
+    
+    elif hr_ld_mode == 'fixed':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
+            U_mu_hr = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
+        elif instrument == 'NIRISS/SOSS':
+            U_mu_hr = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
+        model_run_args_hr['ld_fixed'] = U_mu_hr
+        U_mu_hr_init = U_mu_hr 
+        print("HR Run Config: Using FIXED limb darkening.")
+    
+    else: # hr_ld_mode == 'free'
         if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
-        ld_fixed_hr = U_mu_hr_init
-    else:
-        ld_interpolated_hr = None
-        ld_fixed_hr = None
-        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
-        elif instrument == 'NIRISS/SOSS':
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
-        print("Fitting limb darkening parameters in high-res analysis (initialized from exotic_ld).")
-
-    c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
-    v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
-    if detrend_type_multiwave == 'explinear':
+        print("HR Run Config: FITTING for limb darkening (free).")
+    
+    if hr_trend_mode == 'fixed':
+        c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
+        v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
+        trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr))
+        if detrend_type_multiwave == 'explinear':
             A_interp_hr = np.polyval(best_poly_coeffs_A, wl_hr)
             tau_interp_hr = np.polyval(best_poly_coeffs_tau, wl_hr)
-        if interpolate_trend:
-            trend_fixed_hr = jnp.array(np.column_stack((c_interp_hr, v_interp_hr)))
-            if detrend_type_multiwave == 'explinear':
-                trend_fixed_hr = jnp.array(np.column_stack((c_interp_hr, v_interp_hr, A_interp_hr, tau_interp_hr)))
-
-
-    # Initial Parameters (High Res)
-    if need_lowres_analysis and not interpolate_trend:
-        init_params_hr = {
-            "logD": jnp.log(DURATION_BASE), "t0": T0_BASE, "_b": B_BASE,
-            "depths": DEPTHS_BASE_HR,
-            "u": U_mu_hr_init,
-            "c": jnp.array(c_interp_hr),
-            "v": jnp.array(v_interp_hr),
-            }
+            trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr, A_interp_hr, tau_interp_hr))
+        
+        model_run_args_hr['trend_fixed'] = jnp.array(trend_fixed_hr)
+        print("HR Run Config: Using FIXED (interpolated) trend.")
+    else: # hr_trend_mode == 'free'
+        print("HR Run Config: FITTING for trend (free).")
+    
+    model_run_args_hr['mu_duration'] = DURATION_BASE
+    model_run_args_hr['mu_t0'] = T0_BASE
+    model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
+    model_run_args_hr['PERIOD'] = PERIOD_FIXED
+    
+    init_params_hr = {
+        "logD": jnp.log(DURATION_BASE), "t0": T0_BASE, "_b": B_BASE,
+        "depths": DEPTHS_BASE_HR,
+        "u": U_mu_hr_init,
+    }
+    if hr_trend_mode == 'free':
+        init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
+        init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
         if detrend_type_multiwave == 'explinear':
-            init_params_hr['A'] = jnp.array(A_interp_hr)
-            init_params_hr['tau'] = jnp.array(tau_interp_hr)
-    else:
-        init_params_hr = {
-                "logD": jnp.log(DURATION_BASE), "t0": T0_BASE, "_b": B_BASE,
-                "depths": DEPTHS_BASE_HR,
-                "u": U_mu_hr_init,
-                "c": jnp.full(num_lcs_hr, bestfit_params_wl['c'][0]),
-                "v": jnp.full(num_lcs_hr, bestfit_params_wl['v'][0]),
-            }
-        if detrend_type_multiwave == 'explinear':
-            init_params_hr['A'] = jnp.full(num_lcs_hr, bestfit_params_wl['A'][0])
-            init_params_hr['tau'] = jnp.full(num_lcs_hr, bestfit_params_wl['tau'][0])
-
-    # --- High-Res MCMC  ---
-    print("Running MCMC for high-resolution transmission spectrum...")
-
+            init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
+            init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
+        
+    hr_model_for_run = create_vectorized_model(
+        detrend_type=detrend_type_multiwave,
+        ld_mode=hr_ld_mode,
+        trend_mode=hr_trend_mode
+    )
+    
     samples_hr = get_samples(
-        partial(vectorized_model,
-                mu_duration=DURATION_BASE,
-                mu_t0=T0_BASE,
-                mu_depths=DEPTHS_BASE_HR,
-                PERIOD=PERIOD_FIXED,
-                detrend_type=detrend_type_multiwave),
-        key_mcmc_hr, time_hr, flux_err_hr, flux_hr, init_params_hr,
-        trend_fixed=trend_fixed_hr, # Pass fixed trend if calculated
-        ld_interpolated=ld_interpolated_hr, ld_fixed=ld_fixed_hr
+        model=hr_model_for_run,
+        key=key_mcmc_hr,
+        t=time_hr,
+        yerr=flux_err_hr,
+        indiv_y=flux_hr,
+        init_params=init_params_hr,
+        **model_run_args_hr 
     )
 
-    # Plot and Save Transmission Spectrum
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
                             f"{output_dir}/31_{instrument_full_str}_R{high_resolution_bins}_spectrum.png")
