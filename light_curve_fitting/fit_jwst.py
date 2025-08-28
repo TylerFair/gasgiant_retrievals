@@ -489,7 +489,12 @@ def main():
     plt.scatter(data.wl_time, data.wl_flux)
     plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
     plt.close()
-    
+
+    COMPUTE_KERNELS = {
+    'linear': compute_lc_linear,
+    'explinear': compute_lc_explinear,
+     'gp': compute_lc_gp_mean }
+
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
     if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
@@ -820,12 +825,26 @@ def main():
             map_params_lr['A'] = jnp.nanmedian(samples_lr['A'], axis=0)
             map_params_lr['tau'] = jnp.nanmedian(samples_lr['tau'], axis=0)
 
-        lc_transit_all = jax.vmap(compute_lc_from_params, in_axes=(
-            {k: 0 if k in ['rors', 'u', 'c', 'v', 'A', 'tau'] else None for k in map_params_lr.keys()},
-            None, None
-        ))(map_params_lr, time_lr, detrend_type_multiwave)
 
-        model_all = lc_transit_all
+        
+        try:
+            selected_kernel = COMPUTE_KERNELS[detrend_type_multiwave]
+        except KeyError:
+            raise ValueError(f"Unknown detrend_type: {detrend_type_multiwave}")
+        
+        in_axes_map = {
+            'rors': 0, 
+            'u': 0, 
+            'c': 0, 
+            'v': 0
+        }
+        if detrend_type_multiwave == 'explinear':
+            in_axes_map.update({'A': 0, 'tau': 0})
+        
+        final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
+            
+        model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
+        
         residuals = flux_lr - model_all
 
         medians = np.nanmedian(residuals, axis=1, keepdims=True)
@@ -947,7 +966,8 @@ def main():
     flux_err_hr = jnp.array(data.flux_err_hr[:, ~wl_mad_mask])
 
     if detrending_type == 'gp':
-        trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time, 'gp')
+        transit_model_wl = compute_lc_gp_mean(bestfit_params_wl, data.wl_time)
+        trend_flux = mu - transit_model_wl
         flux_hr = flux_hr / (trend_flux[~wl_mad_mask] + 1)
         detrend_type_multiwave = 'linear'
     else:
