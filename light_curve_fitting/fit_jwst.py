@@ -57,13 +57,13 @@ def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
     lc_transit = _compute_transit_model(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t))
-    return lc_transit + trend
+    return (1.0 + lc_transit) * (1.0 + trend)
 
 def compute_lc_explinear(params, t):
     """Computes transit + exponential-linear trend."""
     lc_transit = _compute_transit_model(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-t / params['tau'])
-    return lc_transit + trend
+    return (1.0 + lc_transit) * (1.0 * trend)
 
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
@@ -91,21 +91,21 @@ def create_whitelight_model(detrend_type='linear'):
 
         # The returned model will only contain ONE of these blocks.
         if detrend_type == 'linear':
-            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
-            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.01))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.01))
             lc_model = compute_lc_linear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
         elif detrend_type == 'explinear':
-            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
-            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
-            params['A'] = numpyro.sample('A', dist.Normal(0, 0.01))
-            params['tau'] = numpyro.sample('tau', dist.Normal(1, 1))
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
+            params['tau'] = numpyro.sample('tau', dist.Normal(1.0, 0.5))
             lc_model = compute_lc_explinear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
         elif detrend_type == 'gp':
-            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
             params['v'] = 0.0 
 
             logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
@@ -170,12 +170,12 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
 
         if trend_mode == 'free':
-            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01).expand([num_lcs]))
-            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01).expand([num_lcs]))
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1).expand([num_lcs]))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
             in_axes.update({'c': 0, 'v': 0})
             if detrend_type == 'explinear':
-                params['A'] = numpyro.sample('A', dist.Normal(0, 0.01).expand([num_lcs]))
-                params['tau'] = numpyro.sample('tau', dist.Normal(1, 0.5).expand([num_lcs]))
+                params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                params['tau'] = numpyro.sample('tau', dist.Normal(1.0, 0.5).expand([num_lcs]))
                 in_axes.update({'A': 0, 'tau': 0})
         elif trend_mode == 'fixed':
             trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
@@ -509,7 +509,7 @@ def main():
                 "rors": jnp.sqrt(PRIOR_DEPTH), 'period': PERIOD_FIXED, '_b': PRIOR_B,
                 'u': U_mu_wl,
              'logD': jnp.log(PRIOR_DUR), 'b': PRIOR_B, 'depths': PRIOR_DEPTH,
-             'c': 1.0, 'v': 0.0,
+             'c': 0.0, 'v': 0.0,
             }
 
         if detrending_type == 'explinear':
@@ -597,7 +597,7 @@ def main():
         wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
 
 
-        plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
+        plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
         plt.scatter(data.wl_time, data.wl_flux, c='r')
        # plt.title('WL GP fit')
         plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
@@ -626,10 +626,10 @@ def main():
         plt.close()
 
         if detrending_type == 'linear':
-            detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])))
+            detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))))
         if detrending_type == 'explinear': 
-            detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
-                                                            + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) 
+            detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
+                                                            + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) )
         if detrending_type == 'gp':
             wl_kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -646,7 +646,7 @@ def main():
             mu, var = cond_gp.loc, cond_gp.variance
            # trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
             trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
-            detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1)
+            detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1.0)
 
         detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
         detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
