@@ -25,8 +25,8 @@ import corner
 import tinygp
 from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
-pd.set_option('display.max_columns', None)
-pd.set_option('display.max_rows', None)
+#pd.set_option('display.max_columns', None)
+#pd.set_option('display.max_rows', None)
 
 # ---------------------
 # Model Functions
