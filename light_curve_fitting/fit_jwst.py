@@ -419,8 +419,8 @@ def main():
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
     need_lowres = flags.get('need_lowres', True)
-    mask_start = flags.get('mask_start', None)
-    mask_end = flags.get('mask_end', None)
+    mask_start = flags.get('mask_start', False)
+    mask_end = flags.get('mask_end', False)
     # binning nm seperation
     high_resolution_bins = bins.get('high', 1)
     low_resolution_bins = bins.get('low', 100)
