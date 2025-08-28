@@ -934,10 +934,10 @@ def main():
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
         print("Fitting limb darkening parameters in high-res analysis (initialized from exotic_ld).")
 
-    if interpolate_trend:
         c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
         v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
-        trend_fixed_hr = jnp.array(np.column_stack((c_interp_hr, v_interp_hr)))
+        if interpolate_trend:
+            trend_fixed_hr = jnp.array(np.column_stack((c_interp_hr, v_interp_hr)))
         if detrend_type_multiwave == 'explinear':
             A_interp_hr = np.polyval(best_poly_coeffs_A, wl_hr)
             tau_interp_hr = np.polyval(best_poly_coeffs_tau, wl_hr)
