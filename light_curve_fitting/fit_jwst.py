@@ -450,7 +450,7 @@ def main():
         M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
         ld_data_path=ld_data_path
     )
-    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' else ''
+    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRESPEC/G395M' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
@@ -475,12 +475,10 @@ def main():
     
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
-    if instrument == 'NIRSPEC/G395H':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument)
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order)
-    elif instrument == 'MIRI/LRS':
-        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument)
 
     if not stringcheck:
         print('Fitting whitelight for outliers and bestfit parameters')
@@ -598,16 +596,27 @@ def main():
         plt.show()
         plt.close()
 
-        plt.figure()
-        plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask]-(bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.time[~wl_mad_mask] - jnp.min(data.time[~wl_mad_mask]))) , c='k')
-        plt.plot(data.wl_time, wl_transit_model-1, c='r')
-        plt.title('Detrended Whitelight w/ Best-fit Model.')
-        plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
-        plt.show()
-        plt.close()
+        if linear:
+            detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])))
+        if explinear: 
+            detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
+                                                            + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) 
+        if gp:
+            wl_kernel = tinygp.kernels.quasisep.Matern32(
+                scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
+                sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
+            )
+            wl_gp = tinygp.GaussianProcess(
+                wl_kernel,
+               data.wl_time[~wl_mad_mask],
+                diag=jnp.exp(bestfit_params_wl['logs2']),
+                mean=1.0,
+            )
+            cond_gp = wl_gp.condition(data.wl_flux[~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
+            mu, var = cond_gp.loc, cond_gp.variance
+            detrended_flux = data.wl_flux - mu + 1.0 #+ compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], detrend_type='gp')
 
-        detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))),
-                                       })
+        detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
         detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
         np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
 
@@ -702,12 +711,11 @@ def main():
 
         DEPTHS_BASE_LR = jnp.full(num_lcs_lr, DEPTH_BASE)
 
-        if instrument == 'NIRSPEC/G395H':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr , instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order)
-        elif instrument == 'MIRI/LRS':
-            U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr,instrument)
+
 
 
         if fix_ld is True:
@@ -913,22 +921,18 @@ def main():
         U_mu_hr_init = ld_interpolated_hr
     elif fix_ld:
         ld_interpolated_hr = None
-        if instrument == 'NIRSPEC/G395H':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
-        elif instrument == 'MIRI/LRS':
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         ld_fixed_hr = U_mu_hr_init
     else:
         ld_interpolated_hr = None
         ld_fixed_hr = None
-        if instrument == 'NIRSPEC/G395H':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
-        elif instrument=='MIRI/LRS':
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         print("Fitting limb darkening parameters in high-res analysis (initialized from exotic_ld).")
 
     if interpolate_trend:
@@ -1022,7 +1026,7 @@ def main():
     else:
         print("LD coefficients were fixed—skipping u₁–u₂ plots.")
 
-    oot_mask = (time_hr < T0_BASE - 1 * DURATION_BASE) | (time_hr > T0_BASE + 1 * DURATION_BASE)
+    oot_mask = (time_hr < T0_BASE - 0.6 * DURATION_BASE) | (time_hr > T0_BASE + 0.6 * DURATION_BASE)
 
     def calc_rms(y_bin):
         baseline = y_bin[oot_mask]
@@ -1031,23 +1035,23 @@ def main():
     rms_vals = jax.vmap(calc_rms)(flux_hr)
 
     plt.figure(figsize=(8,5))
-    plt.scatter(wl_hr, rms_vals, c='k')
+    plt.scatter(wl_hr, rms_vals*1e6, c='k')
     plt.xlabel("Wavelength (μm)")
-    plt.ylabel("Baseline RMS")
-    plt.title("Out‑of‑Transit RMS vs Wavelength")
+    plt.ylabel("Per-Wavelength Noise (ppm)")
+   # plt.title("Out‑of‑Transit RMS vs Wavelength")
     plt.tight_layout()
     plt.savefig(f'{output_dir}/32_{instrument_full_str}_{high_resolution_bins}bins_rms.png')
     plt.close()
 
-    depth_hr = np.nanmedian(samples_hr["depths"], axis=0) 
-    depth_chain = np.array(samples_hr["depths"])       
-    cov_hr = np.cov(depth_chain, rowvar=False)     
-    np.savez(
-    f"{output_dir}/spectrum_native_cov.npz",
-    wavelength=wl_hr,
-    depth=depth_hr,
-    covariance=cov_hr
-    )  
+    #depth_hr = np.nanmedian(samples_hr["depths"], axis=0) 
+    #depth_chain = np.array(samples_hr["depths"])       
+    #cov_hr = np.cov(depth_chain, rowvar=False)     
+    #np.savez(
+    #f"{output_dir}/spectrum_native_cov.npz",
+    #wavelength=wl_hr,
+    #depth=depth_hr,
+    #covariance=cov_hr
+    #)  
 
 
     print("\nAnalysis complete!")
