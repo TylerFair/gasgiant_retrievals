@@ -568,7 +568,7 @@ def main():
 
         plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
         plt.scatter(data.wl_time, data.wl_flux, c='r')
-        plt.title('WL GP fit')
+       # plt.title('WL GP fit')
         plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
         plt.show()
         plt.close()
@@ -576,7 +576,7 @@ def main():
         plt.scatter(data.wl_time, wl_residual, c='k')
         plt.axhline(0, c='r', lw=2)
         plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
-        plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
+        plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
         plt.axhline(4*wl_sigma, c='r', lw=2, ls='--')
         plt.axhline(-4*wl_sigma, c='r', lw=2, ls='--')
         plt.title('WL Pre-outlier rejection residual. Blue, Red Lines are +/- 3, 4 sigma')
@@ -586,7 +586,7 @@ def main():
 
 
 
-        plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
+        #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
         plt.scatter(data.wl_time, data.wl_flux, c='r')
         plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k')
         plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
@@ -608,11 +608,12 @@ def main():
                 wl_kernel,
                data.wl_time[~wl_mad_mask],
                 diag=jnp.exp(bestfit_params_wl['logs2']),
-                mean=1.0,
+                mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
             )
             cond_gp = wl_gp.condition(data.wl_flux[~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
             mu, var = cond_gp.loc, cond_gp.variance
-            detrended_flux = data.wl_flux - mu + 1.0 #+ compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], detrend_type='gp')
+            trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
+            detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1)
 
         detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
         detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
@@ -705,7 +706,7 @@ def main():
         assert time_lr.shape[0] == flux_lr.shape[1], "t_lr and indiv_y_lr should have same number of time points"
         assert time_lr.shape[0] == flux_err_lr.shape[1], "t_lr and yerr_lr should have same number of time points"
 
-        print(f"Low-res: {num_lcs_lr} wavelength bins.")
+        print(f"Low-res: {num_lcs_lr} light curves.")
 
         DEPTHS_BASE_LR = jnp.full(num_lcs_lr, DEPTH_BASE)
 
@@ -815,10 +816,10 @@ def main():
         print("Plotting low-resolution fits and residuals...")
         plot_map_fits(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
                     {"period": PERIOD_FIXED},
-                    f"{output_dir}/22_{instrument_full_str}_{low_resolution_bins}bins_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
+                    f"{output_dir}/22_{instrument_full_str}_R{low_resolution_bins}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
         plot_map_residuals(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
                         {"period": PERIOD_FIXED},
-                        f"{output_dir}/23_{instrument_full_str}_{low_resolution_bins}bins_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
+                        f"{output_dir}/23_{instrument_full_str}_R{low_resolution_bins}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
 
         # Polynomial Fitting for Interpolation
         poly_orders = [1, 2, 3, 4]
@@ -835,10 +836,10 @@ def main():
 
         plot_poly_fit(wl_lr, trend_c_lr, best_poly_coeffs_c, best_order_c,
                         "Wavelength (μm)", "Trend coefficient c", "Trend Offset (c) Polynomial Fit",
-                        f"{output_dir}/2optional1_{instrument_full_str}_{low_resolution_bins}bins_cinterp.png")
+                        f"{output_dir}/2optional1_{instrument_full_str}_R{low_resolution_bins}_cinterp.png")
         plot_poly_fit(wl_lr, trend_v_lr, best_poly_coeffs_v, best_order_v,
                         "Wavelength (μm)", "Trend coefficient v", "Trend Slope (v) Polynomial Fit",
-                        f"{output_dir}/2optional2_{instrument_full_str}_{low_resolution_bins}bins_vinterp.png")
+                        f"{output_dir}/2optional2_{instrument_full_str}_R{low_resolution_bins}_vinterp.png")
 
         if interpolate_ld:
             print("Fitting polynomials to limb darkening coefficients...")
@@ -847,16 +848,16 @@ def main():
             print(f"Selected polynomial degrees: u1={best_order_u1}, u2={best_order_u2}")
             plot_poly_fit(wl_lr, ld_u_lr[:,:, 0], best_poly_coeffs_u1, best_order_u1,
                         "Wavelength (μm)", "LD coefficient u1", "Limb Darkening u1 Polynomial Fit",
-                        f"{output_dir}/2optional3_{instrument_full_str}_{low_resolution_bins}bins_u1interp.png")
+                        f"{output_dir}/2optional3_{instrument_full_str}_R{low_resolution_bins}_u1interp.png")
             plot_poly_fit(wl_lr, ld_u_lr[:,:, 1], best_poly_coeffs_u2, best_order_u2,
                         "Wavelength (μm)", "LD coefficient u2", "Limb Darkening u2 Polynomial Fit",
-                        f"{output_dir}/2optional4_{instrument_full_str}_{low_resolution_bins}bins_u2interp.png")
+                        f"{output_dir}/2optional4_{instrument_full_str}_R{low_resolution_bins}_u2interp.png")
 
 
         print("Plotting and saving lowres transmission spectrum...")
         plot_transmission_spectrum(wl_lr, samples_lr["rors"],
-                            f"{output_dir}/24_{instrument_full_str}_{low_resolution_bins}bins_spectrum.png")
-        save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{low_resolution_bins}bins.csv")
+                            f"{output_dir}/24_{instrument_full_str}_R{low_resolution_bins}_spectrum.png")
+        save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_R{low_resolution_bins}.csv")
 
         oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)
 
@@ -872,7 +873,7 @@ def main():
         plt.ylabel("Per Wavelength Noise (ppm)")
        # plt.title("Out‑of‑Transit RMS vs Wavelength")
         plt.tight_layout()
-        plt.savefig(f'{output_dir}/24_{instrument_full_str}_{low_resolution_bins}bins_rms.png')
+        plt.savefig(f'{output_dir}/24_{instrument_full_str}_R{low_resolution_bins}_rms.png')
         plt.close()
     # --- High-resolution Analysis ---
     print(f"\n--- Running High-Resolution Analysis (Binned at {high_resolution_bins} nm) ---")
@@ -906,7 +907,7 @@ def main():
     assert time_hr.shape[0] == flux_err_hr.shape[1], "t_hr and yerr_hr should have same number of time points"
 
     num_lcs_hr = flux_err_hr.shape[0]
-    print(f"High-res: {num_lcs_hr} wavelength bins.")
+    print(f"High-res: {num_lcs_hr} light curves.")
 
     DEPTHS_BASE_HR = jnp.full(num_lcs_hr, DEPTH_BASE)
     wl_hr = np.array(data.wavelengths_hr)
@@ -985,8 +986,8 @@ def main():
     # Plot and Save Transmission Spectrum
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
-                            f"{output_dir}/31_{instrument_full_str}_{high_resolution_bins}bins_spectrum.png")
-    save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{high_resolution_bins}bins.csv")
+                            f"{output_dir}/31_{instrument_full_str}_R{high_resolution_bins}_spectrum.png")
+    save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_R{high_resolution_bins}.csv")
 
     if "u" in samples_hr:
         u1_16, u1_median, u1_84 = np.percentile(np.array(samples_hr["u"][:,:,0]), [16, 50, 84], axis=0) # Shape: (n_samples, n_lcs, 2)
@@ -1005,7 +1006,7 @@ def main():
         plt.xlabel('Wavelength (micron)')
         plt.ylabel('u1')
         plt.tight_layout()
-        u1_save_path = f'{output_dir}/3optional1_{instrument_full_str}_{high_resolution_bins}bins_u1.png'
+        u1_save_path = f'{output_dir}/3optional1_{instrument_full_str}_R{high_resolution_bins}_u1.png'
         plt.savefig(u1_save_path)
         print(f"Saved u1 plot with uncertainties to {u1_save_path}")
         plt.close()
@@ -1016,7 +1017,7 @@ def main():
         plt.xlabel('Wavelength (micron)')
         plt.ylabel('u2')
         plt.tight_layout()
-        u2_save_path = f'{output_dir}/3optional2_{instrument_full_str}_{high_resolution_bins}bins_u2.png'
+        u2_save_path = f'{output_dir}/3optional2_{instrument_full_str}_R{high_resolution_bins}_u2.png'
         plt.savefig(u2_save_path)
         print(f"Saved u2 plot with uncertainties to {u2_save_path}")
         plt.close()
@@ -1038,7 +1039,7 @@ def main():
     plt.ylabel("Per-Wavelength Noise (ppm)")
    # plt.title("Out‑of‑Transit RMS vs Wavelength")
     plt.tight_layout()
-    plt.savefig(f'{output_dir}/32_{instrument_full_str}_{high_resolution_bins}bins_rms.png')
+    plt.savefig(f'{output_dir}/32_{instrument_full_str}_R{high_resolution_bins}_rms.png')
     plt.close()
 
     #depth_hr = np.nanmedian(samples_hr["depths"], axis=0) 
