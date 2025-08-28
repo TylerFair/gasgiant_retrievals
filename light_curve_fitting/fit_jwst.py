@@ -594,12 +594,12 @@ def main():
         plt.show()
         plt.close()
 
-        if linear:
+        if detrending_type == 'linear':
             detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])))
-        if explinear: 
+        if detrending_type == 'explinear': 
             detrended_flux = data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
                                                             + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) 
-        if gp:
+        if detrending_type == 'gp':
             wl_kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
                 sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
