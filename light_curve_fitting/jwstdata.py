@@ -62,7 +62,7 @@ def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bin
  
     
     # High resolution binning
-    if high_res_bins == 1:
+    if high_res_bins == 'native':
         # Use unbinned data - create bin edges
         bin_edges = np.zeros(len(wavelengths) + 1)
         bin_edges[1:-1] = (wavelengths[:-1] + wavelengths[1:]) / 2
