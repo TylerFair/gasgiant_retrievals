@@ -91,8 +91,8 @@ def create_whitelight_model(detrend_type='linear'):
 
         # The returned model will only contain ONE of these blocks.
         if detrend_type == 'linear':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.01))
-            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.01))
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_linear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
