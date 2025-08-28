@@ -43,7 +43,7 @@ outlier_clip:
   whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
   spectroscopic_sigma: 4 # sigma to clip outliers from spectroscopic residuals
 
-host_device: "cpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda]<=0.4.31, cpu needs jax[cpu]<=0.4.31
+host_device: "gpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda]<=0.4.31, cpu needs jax[cpu]<=0.4.31
 
 
 
