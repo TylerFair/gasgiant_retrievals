@@ -42,9 +42,8 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-
-def compute_lc_from_params(params, t, detrend_type='linear'):
-    """Computes a single light curve + trend from parameters."""
+def _compute_transit_model(params, t):
+    """Transit Model."""
     orbit = TransitOrbit(
         period=params["period"],
         duration=params["duration"],
@@ -52,142 +51,160 @@ def compute_lc_from_params(params, t, detrend_type='linear'):
         time_transit=params["t0"],
         radius_ratio=params["rors"],
     )
-    lc_transit = limb_dark_light_curve(orbit, params["u"])(t)
+    return limb_dark_light_curve(orbit, params["u"])(t)
 
-    if detrend_type == 'linear':
-        trend = params["c"] + params["v"] * (t - jnp.min(t))
-    elif detrend_type == 'explinear':
-        trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-t/params['tau'])
-    elif detrend_type == 'gp':
-        return lc_transit
-    else:
-        raise ValueError(f"Unknown detrend_type: {detrend_type}")
-
+def compute_lc_linear(params, t):
+    """Computes transit + linear trend."""
+    lc_transit = _compute_transit_model(params, t)
+    trend = params["c"] + params["v"] * (t - jnp.min(t))
     return lc_transit + trend
 
+def compute_lc_explinear(params, t):
+    """Computes transit + exponential-linear trend."""
+    lc_transit = _compute_transit_model(params, t)
+    trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-t / params['tau'])
+    return lc_transit + trend
 
-def vectorized_model(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_depths=None, PERIOD=None, trend_fixed=None, ld_interpolated=None, ld_fixed=None, detrend_type='linear'):
-    """Vectorized numpyro model for multiple light curves."""
-    num_lcs = jnp.atleast_2d(yerr).shape[0]
+def compute_lc_gp_mean(params, t):
+    """The mean function for the GP model is just the transit."""
+    return _compute_transit_model(params, t)
 
-    logD = numpyro.sample("logD", dist.Normal(jnp.log(mu_duration), 0.001))
-    duration = numpyro.deterministic("duration", jnp.exp(logD))
+def create_whitelight_model(detrend_type='linear'):
+    """
+    Building a static whitelight model so jax doesn't retrace. 
+    """
+    print(f"Building whitelight model with: detrend_type='{detrend_type}'")
+    def _whitelight_model_static(t, yerr, y=None, prior_params=None):
+        logD = numpyro.sample("logD", dist.Normal(jnp.log(prior_params['duration']), 1e-2))
+        duration = numpyro.deterministic("duration", jnp.exp(logD))
+        t0 = numpyro.sample("t0", dist.Normal(prior_params['t0'], 1e-1))
+        _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
+        b = numpyro.deterministic('b', jnp.abs(_b))
+        u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
+        depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
+        rors = numpyro.deterministic("rors", jnp.sqrt(depths))
 
-    t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-1))
+        params = {
+            "period": prior_params['period'], "duration": duration, "t0": t0, "b": b,
+            "rors": rors, "u": u,
+        }
 
-    _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
-    b = numpyro.deterministic('b', jnp.abs(_b))
+        # The returned model will only contain ONE of these blocks.
+        if detrend_type == 'linear':
+            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
+            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
+            lc_model = compute_lc_linear(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
+        elif detrend_type == 'explinear':
+            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
+            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
+            params['A'] = numpyro.sample('A', dist.Normal(0, 0.01))
+            params['tau'] = numpyro.sample('tau', dist.Normal(1, 1))
+            lc_model = compute_lc_explinear(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
-    if ld_fixed is None and ld_interpolated is None:
-        u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([num_lcs, 2]))  # Assuming u1, u2 are independent and uniform in [-3, 3]
-    elif ld_interpolated is not None:
-        u = numpyro.deterministic("u", ld_interpolated)
-    elif ld_fixed is not None:
-        u = numpyro.deterministic("u", ld_fixed)
+        elif detrend_type == 'gp':
+            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
+            params['v'] = 0.0 
 
-    depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
-    rors = numpyro.deterministic("rors", jnp.sqrt(depths))
+            logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
+            GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
+            GP_log_rho = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
 
-    params = {
-        "period": PERIOD,
-        "duration": duration,
-        "t0": t0,
-        "b": b,
-        "rors": rors,
-        "u": u,
-    }
+            mean_func = partial(compute_lc_gp_mean, params, t=t)
+            kernel = tinygp.kernels.quasisep.Matern32(
+                scale=jnp.exp(GP_log_rho),
+                sigma=jnp.exp(GP_log_sigma),
+            )
+            gp = tinygp.GaussianProcess(kernel, t, diag=jnp.exp(logs2), mean=mean_func)
+            numpyro.sample('obs', gp.numpyro_dist(), obs=y)
+        else:
+            raise ValueError(f"Unknown detrend_type: {detrend_type}")
 
-    if trend_fixed is None:
-        params['c'] = numpyro.sample('c', dist.Normal(1, 0.01).expand([num_lcs]))
-        params['v'] = numpyro.sample('v', dist.Normal(0, 0.01).expand([num_lcs]))
-        if detrend_type == 'explinear':
-            params['A'] = numpyro.sample('A', dist.Normal(0, 0.01).expand([num_lcs]))
-            params['tau'] = numpyro.sample('tau', dist.Normal(1, 0.5).expand([num_lcs]))
-    else:
-        trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
-        params['c'] = numpyro.deterministic('c', trend_temp[:, 0])
-        params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
-        if detrend_type == 'explinear':
-            params['A'] = numpyro.deterministic('A', trend_temp[:, 2])
-            params['tau'] = numpyro.deterministic('tau', trend_temp[:, 3])
-
-
-    in_axes = { "period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0, 'c': 0, 'v': 0}
-    if detrend_type == 'explinear':
-        in_axes.update({'A': 0, 'tau': 0})
-
-    y_model = jax.vmap(compute_lc_from_params, in_axes=(in_axes, None, None))(params, t, detrend_type)
-    numpyro.sample('obs', dist.Normal(y_model, yerr), obs=y)
-
-
-
-def whitelight_model(t, yerr, y=None, prior_params=None, detrend_type='linear'):
-
-    logD = numpyro.sample("logD", dist.Normal(jnp.log(prior_params['duration']), 1e-2))
-    duration = numpyro.deterministic("duration", jnp.exp(logD))
-
-    t0 = numpyro.sample("t0", dist.Normal(prior_params['t0'], 1e-1))
-
-    _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
-    b = numpyro.deterministic('b', jnp.abs(_b))
-    u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))  # Assuming u1, u2 are independent and uniform in [-3, 3]
-    depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
-    rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-
-    params = {
-        "period": prior_params['period'], "duration": duration, "t0": t0, "b": b,
-        "rors": rors, "u": u,
-    }
+    return _whitelight_model_static
+    
+def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free'):
+    """
+    Build a static vectorized model for individual res calls. 
+    It must be built in this way or else we deal with numerous if statement problems. 
+    """
+    print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', trend='{trend_mode}'")
 
     if detrend_type == 'linear':
-        params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
-        params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
-        lc_model = compute_lc_from_params(params, t, detrend_type)
-        numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
-
+        compute_lc_kernel = compute_lc_linear
     elif detrend_type == 'explinear':
-        params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
-        params['v'] = numpyro.sample('v', dist.Normal(0, 0.01))
-        params['A'] = numpyro.sample('A', dist.Normal(0, 0.01))
-        params['tau'] = numpyro.sample('tau', dist.Normal(1, 1))
-        lc_model = compute_lc_from_params(params, t, detrend_type)
-        numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
-
+        compute_lc_kernel = compute_lc_explinear
     elif detrend_type == 'gp':
-        params['c'] = numpyro.sample('c', dist.Normal(1, 0.01))
-        params['v'] = 0.0 # no linear trend in whitelight gp model
-
-        logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
-        GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
-        GP_log_rho = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
-
-        # The mean function is just the transit model
-        mean_func = partial(compute_lc_from_params, params, t=t, detrend_type='gp')
-
-        kernel = tinygp.kernels.quasisep.Matern32(
-            scale=jnp.exp(GP_log_rho),
-            sigma=jnp.exp(GP_log_sigma),
-        )
-        gp = tinygp.GaussianProcess(kernel, t, diag=jnp.exp(logs2), mean=mean_func)
-        numpyro.sample('obs', gp.numpyro_dist(), obs=y)
-
+        compute_lc_kernel = compute_lc_gp_mean
     else:
-        raise ValueError(f"Unknown detrend_type: {detrend_type}")
+        raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
+    def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None,
+                               mu_depths=None, PERIOD=None, trend_fixed=None,
+                               ld_interpolated=None, ld_fixed=None):
 
-def get_samples(model, key, t, yerr, indiv_y, init_params, trend_fixed=None, ld_interpolated=None, ld_fixed=None):
-    """Runs MCMC using NUTS to get posterior samples."""
-    t          = _to_f64(t)
-    yerr       = _to_f64(yerr)
-    indiv_y    = _to_f64(indiv_y)
+        num_lcs = jnp.atleast_2d(yerr).shape[0]
+
+        logD = numpyro.sample("logD", dist.Normal(jnp.log(mu_duration), 0.001))
+        duration = numpyro.deterministic("duration", jnp.exp(logD))
+        t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-1))
+        _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
+        b = numpyro.deterministic('b', jnp.abs(_b))
+        depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
+        rors = numpyro.deterministic("rors", jnp.sqrt(depths))
+
+        if ld_mode == 'free':
+            u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([num_lcs, 2]))
+        elif ld_mode == 'fixed':
+            u = numpyro.deterministic("u", ld_fixed)
+        elif ld_mode == 'interpolated':
+            u = numpyro.deterministic("u", ld_interpolated)
+        else:
+            raise ValueError(f"Unknown ld_mode: {ld_mode}")
+
+        params = {
+            "period": PERIOD, "duration": duration, "t0": t0, "b": b, "rors": rors, "u": u,
+        }
+
+        in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
+
+        if trend_mode == 'free':
+            params['c'] = numpyro.sample('c', dist.Normal(1, 0.01).expand([num_lcs]))
+            params['v'] = numpyro.sample('v', dist.Normal(0, 0.01).expand([num_lcs]))
+            in_axes.update({'c': 0, 'v': 0})
+            if detrend_type == 'explinear':
+                params['A'] = numpyro.sample('A', dist.Normal(0, 0.01).expand([num_lcs]))
+                params['tau'] = numpyro.sample('tau', dist.Normal(1, 0.5).expand([num_lcs]))
+                in_axes.update({'A': 0, 'tau': 0})
+        elif trend_mode == 'fixed':
+            trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
+            params['c'] = numpyro.deterministic('c', trend_temp[:, 0])
+            params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
+            in_axes.update({'c': 0, 'v': 0})
+            if detrend_type == 'explinear':
+                params['A'] = numpyro.deterministic('A', trend_temp[:, 2])
+                params['tau'] = numpyro.deterministic('tau', trend_temp[:, 3])
+                in_axes.update({'A': 0, 'tau': 0})
+        else:
+            raise ValueError(f"Unknown trend_mode: {trend_mode}")
+
+        y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
+        numpyro.sample('obs', dist.Normal(y_model, yerr), obs=y)
+
+    return _vectorized_model_static
+    
+def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
+    """
+    Runs MCMC using NUTS to get posterior samples.
+    Accepts additional keyword arguments to pass directly to the model.
+    """
+    t = _to_f64(t)
+    yerr = _to_f64(yerr)
+    indiv_y = _to_f64(indiv_y)
     init_params = _tree_to_f64(init_params)
-    if trend_fixed is not None:
-        trend_fixed = _to_f64(trend_fixed)
-    if ld_interpolated is not None:
-        ld_interpolated = _to_f64(ld_interpolated)
-    if ld_fixed is not None:
-        ld_fixed = _to_f64(ld_fixed)
+    
+    model_kwargs = _tree_to_f64(model_kwargs)
         
     mcmc = numpyro.infer.MCMC(
         numpyro.infer.NUTS(
@@ -201,8 +218,10 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, trend_fixed=None, ld_
         progress_bar=True,
         jit_model_args=True
     )
-    mcmc.run(key, t, yerr, y=indiv_y, trend_fixed=trend_fixed,ld_interpolated=ld_interpolated, ld_fixed=ld_fixed)
-
+    
+    #  **model_kwargs unpacks the dictionary into kwargs
+    # e.g., if model_kwargs is {'ld_fixed': arr},mcmc.run(..., ld_fixed=arr)
+    mcmc.run(key, t, yerr, y=indiv_y, **model_kwargs)
 
     return mcmc.get_samples()
 
@@ -500,11 +519,14 @@ def main():
             print("Setting platform to 'cpu' for GP whitelight fit.")
             numpyro.set_platform('cpu')
 
-        soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
-
+        whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
+        #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
+        soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
+        
         mcmc = numpyro.infer.MCMC(
             numpyro.infer.NUTS(
-                partial(whitelight_model, detrend_type=detrending_type),
+                whitelight_model_for_run
+             #   partial(whitelight_model, detrend_type=detrending_type),
                 regularize_mass_matrix=False,
                 init_strategy=numpyro.infer.init_to_value(values=soln),
                 target_accept_prob=0.9,
@@ -538,8 +560,11 @@ def main():
             bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
 
 
-        wl_transit_model = compute_lc_from_params(bestfit_params_wl, data.wl_time, detrending_type)
-
+        #wl_transit_model = compute_lc_from_params(bestfit_params_wl, data.wl_time, detrending_type)
+        if detrending_type == 'linear':
+            wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
+        if detrending_type == 'explinear':
+            wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
         if detrending_type == 'gp':
             wl_kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -549,7 +574,8 @@ def main():
                 wl_kernel,
                 data.wl_time,
                 diag=jnp.exp(bestfit_params_wl['logs2']),
-                mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+               #mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+                mean=partial(compute_lc_gp_mean, bestfit_params_wl),
             )
             cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
             mu, var = cond_gp.loc, cond_gp.variance
@@ -608,11 +634,13 @@ def main():
                 wl_kernel,
                data.wl_time[~wl_mad_mask],
                 diag=jnp.exp(bestfit_params_wl['logs2']),
-                mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+               # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+                mean=partial(compute_lc_gp_mean, bestfit_params_wl),
             )
             cond_gp = wl_gp.condition(data.wl_flux[~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
             mu, var = cond_gp.loc, cond_gp.variance
-            trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
+           # trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
+            trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
             detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1)
 
         detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
@@ -689,7 +717,8 @@ def main():
 
         if detrending_type == 'gp':
             # The GP was fit to the white light. We now divide it out from the spectroscopic LCs.
-            trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time, 'gp')
+            #trend_flux = mu - compute_lc_from_params(bestfit_params_wl, time_lr 'gp')
+            trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, time_lr)
             flux_lr = flux_lr / (trend_flux[~wl_mad_mask] + 1)
             # After dividing out the GP, we fit a linear trend to the spectroscopic LCs.
             detrend_type_multiwave = 'linear'
@@ -733,10 +762,39 @@ def main():
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl['tau'][0])
 
         print("Sampling low-res model using MCMC to find median coefficients...")
-        samples_lr = get_samples(
-            partial(vectorized_model, mu_duration=DURATION_BASE, mu_t0=T0_BASE, mu_depths=DEPTHS_BASE_LR, PERIOD=PERIOD_FIXED, detrend_type=detrend_type_multiwave),
-            key_mcmc_lr, time_lr, flux_err_lr, flux_lr, init_params_lr,)
+        #samples_lr = get_samples(
+        #    partial(vectorized_model, mu_duration=DURATION_BASE, mu_t0=T0_BASE, mu_depths=DEPTHS_BASE_LR, PERIOD=PERIOD_FIXED, detrend_type=detrend_type_multiwave),
+        #    key_mcmc_lr, time_lr, flux_err_lr, flux_lr, init_params_lr,)
 
+        lr_trend_mode = 'free' 
+        
+        lr_ld_mode = 'free'
+        if flags.get('fix_ld', False):
+            lr_ld_mode = 'fixed'
+    
+        
+        lr_model_for_run = create_vectorized_model(
+            detrend_type=detrend_type_multiwave, 
+            ld_mode=lr_ld_mode,
+            trend_mode=lr_trend_mode
+        )
+        
+        
+        model_run_args_lr = {}
+        if lr_ld_mode == 'fixed':
+            model_run_args_lr['ld_fixed'] = U_mu_lr
+            
+        
+        samples_lr = get_samples(
+            model=lr_model_for_run,
+            key=key_mcmc_lr,       
+            t=time_lr,                 
+            yerr=flux_err_lr,          
+            indiv_y=flux_lr,          
+            init_params=init_params_lr,
+            **model_run_args_lr
+        )      
+        
         ld_u_lr = np.array(samples_lr["u"])
         trend_c_lr = np.array(samples_lr["c"])
         trend_v_lr = np.array(samples_lr["v"])
