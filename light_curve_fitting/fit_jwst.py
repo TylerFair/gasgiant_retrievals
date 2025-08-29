@@ -112,7 +112,7 @@ def create_whitelight_model(detrend_type='linear'):
             GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
             GP_log_rho = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
 
-            mean_func = partial(compute_lc_gp_mean, params, t=t)
+            mean_func = partial(compute_lc_gp_mean, params)
             kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(GP_log_rho),
                 sigma=jnp.exp(GP_log_sigma),
