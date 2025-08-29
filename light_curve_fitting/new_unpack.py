@@ -99,10 +99,10 @@ def unpack_niriss_exoted(infile, order):
     wave_err = wave_err[5:-5]
     fluxcube = fluxcube[:, 5:-5]
     base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
+    
     #median_flux = np.nanmedian(fluxcube[base], axis=0)
     #fluxcube = fluxcube / median_flux
-    sum_wlc = np.nansum(fluxcube, axis=1)
-    fluxcube = sum_wlc / np.nanmedian(sum_wlc[base], axis=0)
+
     
     if order == 2:
         ii = np.where((wave >= 0.6) & (wave <= 0.85))[0]
@@ -122,16 +122,15 @@ def unpack_nirspec_exoted(infile):
     wave_err = fits.getdata(infile, 2)
     fluxcube = fits.getdata(infile, 3)
 
-    #base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
-    #median_flux = np.nanmedian(fluxcube[base], axis=0)
-    #fluxcube = fluxcube / median_flux
+
+    
     ii = np.where(wave >= 2.87)[0]
     fluxcube = fluxcube[:, ii]
     wave, wave_err = wave[ii], wave_err[ii]
-
-    sum_wlc = np.nansum(fluxcube, axis=1)
-    base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
-    fluxcube = sum_wlc / np.nanmedian(sum_wlc[base], axis=0)
+    
+    #base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
+    #median_flux = np.nanmedian(fluxcube[base], axis=0)
+    #fluxcube = fluxcube / median_flux
 
     wavelength = wave
     t = np.array(bjd)
@@ -151,10 +150,8 @@ def unpack_miri_exoted(infile):
     ii = np.argsort(wave)
     wave, wave_err = wave[ii], wave_err[ii]
     fluxcube = fluxcube[:,ii]
-
-    sum_wlc = np.nansum(fluxcube, axis=1)
-    base = -1 - np.arange(50).astype(int)
-    fluxcube = sum_wlc / np.nanmedian(sum_wlc[base], axis=0)
+    
+    ### This part was normalizing each flux by median flux
     #median_flux = np.nanmedian(fluxcube[base], axis=0)
     #fluxcube = fluxcube / median_flux
 
