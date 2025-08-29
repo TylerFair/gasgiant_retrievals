@@ -67,7 +67,7 @@ def compute_lc_explinear(params, t):
 
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
-    return (_compute_transit_model(params, t) + 1.0)
+    return (_compute_transit_model(params, t) + 1.0) * (1.0 + params["c"])
 
 def create_whitelight_model(detrend_type='linear'):
     """
@@ -558,7 +558,7 @@ def main():
             bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
                                 'b': jnp.nanmedian(wl_samples['b']), 'rors': jnp.nanmedian(wl_samples['rors']),
                                 'period': PERIOD_FIXED, 'u': jnp.nanmedian(wl_samples['u'], axis=0),
-                                'c': jnp.nanmedian(wl_samples['c']) if detrending_type != 'gp' else 0.0,
+                                'c': jnp.nanmedian(wl_samples['c']),
                                  'v': jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0,
                                 }
             if detrending_type == 'explinear':
@@ -607,8 +607,6 @@ def main():
             plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
             plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
     
-            print(jnp.min(wl_transit_model), jnp.max(wl_transit_model))
-            print(jnp.min(data.wl_flux), jnp.max(data.wl_flux))
            # plt.title('WL GP fit')
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.show()
@@ -629,16 +627,16 @@ def main():
     
             #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
             plt.scatter(data.wl_time, data.wl_flux, c='r', s=1)
-            plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[:, ~wl_mad_mask], c='k', s=1)
+            plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=1)
             plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
             plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
             plt.show()
             plt.close()
     
             if detrending_type == 'linear':
-                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))))
+                detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))))
             if detrending_type == 'explinear': 
-                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
+                detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
                                                                 + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) )
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
@@ -652,11 +650,11 @@ def main():
                    # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
                     mean=partial(compute_lc_gp_mean, bestfit_params_wl),
                 )
-                cond_gp = wl_gp.condition(data.wl_flux[:, ~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
+                cond_gp = wl_gp.condition(data.wl_flux[~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
                 mu, var = cond_gp.loc, cond_gp.variance
                # trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
                 trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
-                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (trend_flux + 1.0)
+                detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux + 1.0)
                 planet_model_only = compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
     
             plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=1)
@@ -669,7 +667,7 @@ def main():
             detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
     
-            df = pd.DataFrame({'wl_flux': data.wl_flux[:, ~wl_mad_mask], 'wl_err': data.wl_flux_err[:, ~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
+            df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
             df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
             #create new save params wl variable with the bestift_params and their uncertainties
             bestfit_params_wl['duration_err'] = jnp.std(wl_samples['duration'], axis=0)
