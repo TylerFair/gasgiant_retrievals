@@ -559,7 +559,8 @@ def main():
         bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
                             'b': jnp.nanmedian(wl_samples['b']), 'rors': jnp.nanmedian(wl_samples['rors']),
                             'period': PERIOD_FIXED, 'u': jnp.nanmedian(wl_samples['u'], axis=0),
-                            'c': jnp.nanmedian(wl_samples['c']), 'v': jnp.nanmedian(wl_samples['v']),
+                            'c': jnp.nanmedian(wl_samples['c']) if detrending_type != 'gp' else 0.0,
+                             'v': jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0,
                             }
         if detrending_type == 'explinear':
             bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
