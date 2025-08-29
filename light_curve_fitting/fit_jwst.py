@@ -590,9 +590,11 @@ def main():
             )
             cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
             mu, var = cond_gp.loc, cond_gp.variance
-            wl_residual = data.wl_flux - mu
-        else:
-            wl_residual = data.wl_flux - wl_transit_model
+            wl_transit_model = mu
+            #wl_residual = data.wl_flux - mu
+        #else:
+         #   wl_residual = data.wl_flux - wl_transit_model
+        wl_residual = data.wl_flux - wl_transit_model
 
 
         wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
