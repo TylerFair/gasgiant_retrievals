@@ -501,204 +501,210 @@ def main():
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order)
 
     if not stringcheck or (detrending_type == 'gp'):
-        plt.scatter(data.wl_time, data.wl_flux)
-        plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
-        plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
-        keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
-        plt.close()
-        if keep_going.lower == 'n':
-            exit()
-        print('Fitting whitelight for outliers and bestfit parameters')
-        prior_params_wl = {
-                "duration": PRIOR_DUR, "t0": PRIOR_T0,
-                "rors": jnp.sqrt(PRIOR_DEPTH), 'period': PERIOD_FIXED, '_b': PRIOR_B,
-                'u': U_mu_wl,
-             'logD': jnp.log(PRIOR_DUR), 'b': PRIOR_B, 'depths': PRIOR_DEPTH,
-             'c': 0.0, 'v': 0.0,
-            }
-
-        if detrending_type == 'explinear':
-            prior_params_wl['A'] = 0.0
-            prior_params_wl['tau'] = 0.5
-        elif detrending_type == 'gp':
-            prior_params_wl['logs2'] = jnp.log(2*jnp.nanmedian(data.wl_flux_err))
-            prior_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
-            prior_params_wl['GP_log_rho'] = jnp.log(1e-1)
-
-        if detrending_type == 'gp':
-            print("Setting platform to 'cpu' for GP whitelight fit.")
-            numpyro.set_platform('cpu')
-
-        whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
-        #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
-        soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
-        
-        mcmc = numpyro.infer.MCMC(
-            numpyro.infer.NUTS(
-                whitelight_model_for_run,
-             #   partial(whitelight_model, detrend_type=detrending_type),
-                regularize_mass_matrix=False,
-                init_strategy=numpyro.infer.init_to_value(values=soln),
-                target_accept_prob=0.9,
-            ),
-            num_warmup=1000,
-            num_samples=1000,
-            progress_bar=True,
-            jit_model_args=True
-        )
-        mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
-        inf_data = az.from_numpyro(mcmc)
-
-        wl_samples = mcmc.get_samples()
-
-        if detrending_type == 'gp':
-            print(f"Setting platform back to '{host_device}' for multi-wavelength fit.")
-            numpyro.set_platform(host_device)
-        print(az.summary(inf_data, var_names=None, round_to=7))
-
-        bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
-                            'b': jnp.nanmedian(wl_samples['b']), 'rors': jnp.nanmedian(wl_samples['rors']),
-                            'period': PERIOD_FIXED, 'u': jnp.nanmedian(wl_samples['u'], axis=0),
-                            'c': jnp.nanmedian(wl_samples['c']) if detrending_type != 'gp' else 0.0,
-                             'v': jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0,
-                            }
-        if detrending_type == 'explinear':
-            bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
-            bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
-        elif detrending_type == 'gp':
-            bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
-            bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
-            bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
-
-
-        #wl_transit_model = compute_lc_from_params(bestfit_params_wl, data.wl_time, detrending_type)
-        if detrending_type == 'linear':
-            wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
-        if detrending_type == 'explinear':
-            wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
-        if detrending_type == 'gp':
-            wl_kernel = tinygp.kernels.quasisep.Matern32(
-                scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
-                sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
+        if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
+            plt.scatter(data.wl_time, data.wl_flux)
+            plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
+            plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
+            keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
+            plt.close()
+            if keep_going.lower == 'n':
+                exit()
+            print('Fitting whitelight for outliers and bestfit parameters')
+            prior_params_wl = {
+                    "duration": PRIOR_DUR, "t0": PRIOR_T0,
+                    "rors": jnp.sqrt(PRIOR_DEPTH), 'period': PERIOD_FIXED, '_b': PRIOR_B,
+                    'u': U_mu_wl,
+                 'logD': jnp.log(PRIOR_DUR), 'b': PRIOR_B, 'depths': PRIOR_DEPTH,
+                 'c': 0.0, 'v': 0.0,
+                }
+    
+            if detrending_type == 'explinear':
+                prior_params_wl['A'] = 0.0
+                prior_params_wl['tau'] = 0.5
+            elif detrending_type == 'gp':
+                prior_params_wl['logs2'] = jnp.log(2*jnp.nanmedian(data.wl_flux_err))
+                prior_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
+                prior_params_wl['GP_log_rho'] = jnp.log(1e-1)
+    
+            if detrending_type == 'gp':
+                print("Setting platform to 'cpu' for GP whitelight fit.")
+                numpyro.set_platform('cpu')
+    
+            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
+            #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
+            soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
+            
+            mcmc = numpyro.infer.MCMC(
+                numpyro.infer.NUTS(
+                    whitelight_model_for_run,
+                 #   partial(whitelight_model, detrend_type=detrending_type),
+                    regularize_mass_matrix=False,
+                    init_strategy=numpyro.infer.init_to_value(values=soln),
+                    target_accept_prob=0.9,
+                ),
+                num_warmup=1000,
+                num_samples=1000,
+                progress_bar=True,
+                jit_model_args=True
             )
-            wl_gp = tinygp.GaussianProcess(
-                wl_kernel,
-                data.wl_time,
-                diag=jnp.exp(bestfit_params_wl['logs2']),
-               #mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
-                mean=partial(compute_lc_gp_mean, bestfit_params_wl),
-            )
-            cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
-            mu, var = cond_gp.loc, cond_gp.variance
-            wl_transit_model = mu
-            #wl_residual = data.wl_flux - mu
-        #else:
-         #   wl_residual = data.wl_flux - wl_transit_model
-        wl_residual = data.wl_flux - wl_transit_model
-
-
-        wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
-
-
-        wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
-
-        wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
-
-
-        plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
-        plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
-
-        print(jnp.min(wl_transit_model), jnp.max(wl_transit_model))
-        print(jn.pmin(data.wl_flux), jnp.max(data.wl_flux))
-       # plt.title('WL GP fit')
-        plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
-        plt.show()
-        plt.close()
-
-        plt.scatter(data.wl_time, wl_residual, c='k', s=2)
-        plt.axhline(0, c='r', lw=2)
-        plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
-        plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
-        plt.axhline(4*wl_sigma, c='r', lw=2, ls='--')
-        plt.axhline(-4*wl_sigma, c='r', lw=2, ls='--')
-        plt.title('WL Pre-outlier rejection residual. Blue, Red Lines are +/- 3, 4 sigma')
-        plt.savefig(f"{output_dir}/12_{instrument_full_str}_whitelightresidual.png")
-        plt.show()
-        plt.close()
-
-
-
-        #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
-        plt.scatter(data.wl_time, data.wl_flux, c='r', s=1)
-        plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=1)
-        plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
-        plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
-        plt.show()
-        plt.close()
-
-        if detrending_type == 'linear':
-            detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))))
-        if detrending_type == 'explinear': 
-            detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
-                                                            + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) )
-        if detrending_type == 'gp':
-            wl_kernel = tinygp.kernels.quasisep.Matern32(
-                scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
-                sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
-            )
-            wl_gp = tinygp.GaussianProcess(
-                wl_kernel,
-               data.wl_time[~wl_mad_mask],
-                diag=jnp.exp(bestfit_params_wl['logs2']),
-               # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
-                mean=partial(compute_lc_gp_mean, bestfit_params_wl),
-            )
-            cond_gp = wl_gp.condition(data.wl_flux[~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
-            mu, var = cond_gp.loc, cond_gp.variance
-           # trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
-            trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
-            detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux[~wl_mad_mask] + 1.0)
-
-        plt.scatter(data.wl_time[~wl_mad_mask, detrended_flux, c='k', s=1)
-        plt.title(f'WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
-        plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
-        plt.show()
-        plt.close()
-        
-        detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
-        detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
-        np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
-
-        #create new save params wl variable with the bestift_params and their uncertainties
-        bestfit_params_wl['duration_err'] = jnp.std(wl_samples['duration'], axis=0)
-        bestfit_params_wl['t0_err'] = jnp.std(wl_samples['t0'], axis=0)
-        bestfit_params_wl['b_err'] = jnp.std(wl_samples['b'], axis=0)
-        bestfit_params_wl['rors_err'] = jnp.std(wl_samples['rors'], axis=0)
-        bestfit_params_wl['depths_err'] = jnp.std(wl_samples['rors']**2, axis=0)
-        bestfit_params_wl['u_err'] = jnp.std(wl_samples['u'], axis=0)
-        bestfit_params_wl['c_err'] = jnp.std(wl_samples['c'], axis=0)
-        bestfit_params_wl['v_err'] = jnp.std(wl_samples['v'], axis=0)
-        if detrending_type == 'explinear':
-            bestfit_params_wl['A_err'] = jnp.std(wl_samples['A'], axis=0)
-            bestfit_params_wl['tau_err'] = jnp.std(wl_samples['tau'], axis=0)
-        elif detrending_type == 'gp':
-            bestfit_params_wl['logs2_err'] = jnp.std(wl_samples['logs2'], axis=0)
-            bestfit_params_wl['GP_log_sigma_err'] = jnp.std(wl_samples['GP_log_sigma'], axis=0)
-            bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
-
-
-        df = pd.DataFrame.from_dict(bestfit_params_wl, orient='index')
-        df = df.transpose()
-        df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-        print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-        bestfit_params_wl = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-
-
-        DURATION_BASE = jnp.array(bestfit_params_wl['duration'][0])
-        T0_BASE = jnp.array(bestfit_params_wl['t0'][0])
-        B_BASE = jnp.array(bestfit_params_wl['b'][0])
-        RORS_BASE = jnp.array(bestfit_params_wl['rors'][0])
-        DEPTH_BASE = RORS_BASE**2
+            mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
+            inf_data = az.from_numpyro(mcmc)
+    
+            wl_samples = mcmc.get_samples()
+    
+            if detrending_type == 'gp':
+                print(f"Setting platform back to '{host_device}' for multi-wavelength fit.")
+                numpyro.set_platform(host_device)
+            print(az.summary(inf_data, var_names=None, round_to=7))
+    
+            bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
+                                'b': jnp.nanmedian(wl_samples['b']), 'rors': jnp.nanmedian(wl_samples['rors']),
+                                'period': PERIOD_FIXED, 'u': jnp.nanmedian(wl_samples['u'], axis=0),
+                                'c': jnp.nanmedian(wl_samples['c']) if detrending_type != 'gp' else 0.0,
+                                 'v': jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0,
+                                }
+            if detrending_type == 'explinear':
+                bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
+                bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+            elif detrending_type == 'gp':
+                bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
+                bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
+                bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
+    
+    
+            #wl_transit_model = compute_lc_from_params(bestfit_params_wl, data.wl_time, detrending_type)
+            if detrending_type == 'linear':
+                wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
+            if detrending_type == 'explinear':
+                wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
+            if detrending_type == 'gp':
+                wl_kernel = tinygp.kernels.quasisep.Matern32(
+                    scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
+                    sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
+                )
+                wl_gp = tinygp.GaussianProcess(
+                    wl_kernel,
+                    data.wl_time,
+                    diag=jnp.exp(bestfit_params_wl['logs2']),
+                   #mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+                    mean=partial(compute_lc_gp_mean, bestfit_params_wl),
+                )
+                cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
+                mu, var = cond_gp.loc, cond_gp.variance
+                wl_transit_model = mu
+                #wl_residual = data.wl_flux - mu
+            #else:
+             #   wl_residual = data.wl_flux - wl_transit_model
+            wl_residual = data.wl_flux - wl_transit_model
+    
+    
+            wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
+    
+    
+            wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
+    
+            wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
+    
+    
+            plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
+            plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
+    
+            print(jnp.min(wl_transit_model), jnp.max(wl_transit_model))
+            print(jn.pmin(data.wl_flux), jnp.max(data.wl_flux))
+           # plt.title('WL GP fit')
+            plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
+            plt.show()
+            plt.close()
+    
+            plt.scatter(data.wl_time, wl_residual, c='k', s=2)
+            plt.axhline(0, c='r', lw=2)
+            plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
+            plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
+            plt.axhline(4*wl_sigma, c='r', lw=2, ls='--')
+            plt.axhline(-4*wl_sigma, c='r', lw=2, ls='--')
+            plt.title('WL Pre-outlier rejection residual. Blue, Red Lines are +/- 3, 4 sigma')
+            plt.savefig(f"{output_dir}/12_{instrument_full_str}_whitelightresidual.png")
+            plt.show()
+            plt.close()
+    
+    
+    
+            #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
+            plt.scatter(data.wl_time, data.wl_flux, c='r', s=1)
+            plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[:, ~wl_mad_mask], c='k', s=1)
+            plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+            plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
+            plt.show()
+            plt.close()
+    
+            if detrending_type == 'linear':
+                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))))
+            if detrending_type == 'explinear': 
+                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (1.0 + (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
+                                                                + bestfit_params_wl['A'] * jnp.exp(-data.wl_time[~wl_mad_mask]/bestfit_params_wl['tau'])) )
+            if detrending_type == 'gp':
+                wl_kernel = tinygp.kernels.quasisep.Matern32(
+                    scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
+                    sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
+                )
+                wl_gp = tinygp.GaussianProcess(
+                    wl_kernel,
+                   data.wl_time[~wl_mad_mask],
+                    diag=jnp.exp(bestfit_params_wl['logs2']),
+                   # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
+                    mean=partial(compute_lc_gp_mean, bestfit_params_wl),
+                )
+                cond_gp = wl_gp.condition(data.wl_flux[:, ~wl_mad_mask], data.wl_time[~wl_mad_mask]).gp
+                mu, var = cond_gp.loc, cond_gp.variance
+               # trend_flux = mu - compute_lc_from_params(bestfit_params_wl, data.wl_time[~wl_mad_mask], 'gp')
+                trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
+                detrended_flux = data.wl_flux[:, ~wl_mad_mask] / (trend_flux + 1.0)
+                planet_model_only = compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
+    
+            plt.scatter(data.wl_time[~wl_mad_mask, detrended_flux, c='k', s=1)
+            plt.title(f'WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+            plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
+            plt.show()
+            plt.close()
+            
+            detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
+            detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
+            np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
+    
+            df = pd.DataFrame({'wl_flux': data.wl_flux[:, ~wl_mad_mask], 'wl_err': data.wl_flux_err[:, ~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
+            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+            #create new save params wl variable with the bestift_params and their uncertainties
+            bestfit_params_wl['duration_err'] = jnp.std(wl_samples['duration'], axis=0)
+            bestfit_params_wl['t0_err'] = jnp.std(wl_samples['t0'], axis=0)
+            bestfit_params_wl['b_err'] = jnp.std(wl_samples['b'], axis=0)
+            bestfit_params_wl['rors_err'] = jnp.std(wl_samples['rors'], axis=0)
+            bestfit_params_wl['depths_err'] = jnp.std(wl_samples['rors']**2, axis=0)
+            bestfit_params_wl['u_err'] = jnp.std(wl_samples['u'], axis=0)
+            bestfit_params_wl['c_err'] = jnp.std(wl_samples['c'], axis=0)
+            bestfit_params_wl['v_err'] = jnp.std(wl_samples['v'], axis=0)
+            if detrending_type == 'explinear':
+                bestfit_params_wl['A_err'] = jnp.std(wl_samples['A'], axis=0)
+                bestfit_params_wl['tau_err'] = jnp.std(wl_samples['tau'], axis=0)
+            elif detrending_type == 'gp':
+                bestfit_params_wl['logs2_err'] = jnp.std(wl_samples['logs2'], axis=0)
+                bestfit_params_wl['GP_log_sigma_err'] = jnp.std(wl_samples['GP_log_sigma'], axis=0)
+                bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
+    
+    
+            df = pd.DataFrame.from_dict(bestfit_params_wl, orient='index')
+            df = df.transpose()
+            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            bestfit_params_wl = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+    
+    
+            DURATION_BASE = jnp.array(bestfit_params_wl['duration'][0])
+            T0_BASE = jnp.array(bestfit_params_wl['t0'][0])
+            B_BASE = jnp.array(bestfit_params_wl['b'][0])
+            RORS_BASE = jnp.array(bestfit_params_wl['rors'][0])
+            DEPTH_BASE = RORS_BASE**2
+        else:
+            print(f'GP trends already exist... If you want to refit GP on whitelight please remove {output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
     else:
         print(f'Whitelight outliers and bestfit parameters already exist, skipping whitelight fit. If you want to fit whitelight please delete {output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
         wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
@@ -738,10 +744,12 @@ def main():
         num_lcs_lr = jnp.array(data.flux_err_lr.shape[0])
 
         if detrending_type == 'gp':
+            gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+            trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values 
             # The GP was fit to the white light. We now divide it out from the spectroscopic LCs.
             #trend_flux = mu - compute_lc_from_params(bestfit_params_wl, time_lr 'gp')
-            trend_flux = mu - compute_lc_gp_mean(bestfit_params_wl, time_lr)
-            flux_lr = flux_lr / (trend_flux[~wl_mad_mask] + 1)
+            flux_lr = jnp.array(data.flux_lr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
+            flux_err_lr = jnp.nanmedian(jnp.abs(jnp.diff(flux_lr)))
             # After dividing out the GP, we fit a linear trend to the spectroscopic LCs.
             detrend_type_multiwave = 'linear'
         else:
