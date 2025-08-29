@@ -608,7 +608,7 @@ def main():
             plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
     
             print(jnp.min(wl_transit_model), jnp.max(wl_transit_model))
-            print(jn.pmin(data.wl_flux), jnp.max(data.wl_flux))
+            print(jnp.min(data.wl_flux), jnp.max(data.wl_flux))
            # plt.title('WL GP fit')
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.show()
