@@ -45,38 +45,42 @@ def normalize_flux(flux, flux_err, norm_range=slice(0, 50)):
 
 
 def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bins):
-    """Handle all the binning logic in one place."""
-    # Transpose flux for binning: (n_time, n_wavelength) -> (n_wavelength, n_time)
-    flux_transposed = jnp.array(flux_unbinned.T)
-    # 1) compute the median spectrum (one value per wavelength)
-    median_indiv = jnp.nanmedian(flux_transposed, axis=1, keepdims=True)  
-    # 2) compute the MAD per wavelength
-    #    subtract that median from each time, take abs, median again along time
-    err_indiv = 1.4826 * jnp.nanmedian(jnp.abs(flux_transposed - median_indiv),axis=1,)          
-    flux_err = jnp.tile(err_indiv[:, None], (1, flux_transposed.shape[1]))
+    # flux_unbinned is (T, L)
+    T, L = flux_unbinned.shape
 
-    # Low resolution binning
+    # ---  per-wavelength normalization (sum over time) ---
+    sum_per_lambda = jnp.nansum(flux_unbinned, axis=0, keepdims=True)            
+    flux_norm = flux_unbinned / sum_per_lambda                                     # (T, L)
+
+    if T >= 3:
+        resid = 0.5 * (flux_norm[:-2, :] + flux_norm[2:, :]) - flux_norm[1:-1, :] 
+        err_per_lambda = jnp.nanmedian(jnp.abs(resid), axis=0)                    
+    else:
+        err_per_lambda = jnp.full((L,), jnp.nan)
+
+    # Shapes expected by bin_at_resolution: (n_wavelength, n_time)
+    flux_transposed = jnp.array(flux_unbinned.T)                                    # (L, T)
+    flux_err_T = jnp.tile(err_per_lambda[:, None], (1, T))                          # (L, T)
+
+    # --- Low resolution binning ---
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
-        wavelengths, flux_transposed, flux_err, low_res_bins, method='average'
+        wavelengths, flux_transposed, flux_err_T, low_res_bins, method='average'
     )
- 
-    
-    # High resolution binning
+
+    # --- High resolution binning ---
     if high_res_bins == 'native':
-        # Use unbinned data - create bin edges
         bin_edges = np.zeros(len(wavelengths) + 1)
         bin_edges[1:-1] = (wavelengths[:-1] + wavelengths[1:]) / 2
         bin_edges[0] = wavelengths[0] - (wavelengths[1] - wavelengths[0]) / 2
         bin_edges[-1] = wavelengths[-1] + (wavelengths[-1] - wavelengths[-2]) / 2
         wl_err_hr = (bin_edges[1:] - bin_edges[:-1]) / 2
-        
-        wl_hr, flux_hr, flux_err_hr = wavelengths, flux_transposed, flux_err
+
+        wl_hr, flux_hr, flux_err_hr = wavelengths, flux_transposed, flux_err_T
     else:
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
-            wavelengths, flux_transposed, flux_err, high_res_bins, method='average'
+            wavelengths, flux_transposed, flux_err_T, high_res_bins, method='average'
         )
-    
-    # Normalize both
+
     flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr)
     flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr)
 
@@ -140,12 +144,17 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         wavelengths, flux_unbinned, cfg['resolution'].get('low'), cfg['resolution'].get('high')
     )
     
-    # Create white light curve
-    if instrument == 'MIRI/LRS':
-        wl_flux = jnp.nanmedian(flux_unbinned, axis=1)
+    # --- White light via nansum/median(nansum) + robust error (3-point residual) ---
+    wl_raw = jnp.nansum(flux_unbinned, axis=1)                  
+    wl_norm = wl_raw / jnp.nanmedian(wl_raw)                    
+
+    if wl_norm.shape[0] >= 3:
+        wl_resid = 0.5 * (wl_norm[:-2] + wl_norm[2:]) - wl_norm[1:-1]
+        wl_flux_err = jnp.nanmedian(jnp.abs(wl_resid))
     else:
-        wl_flux = jnp.nanmean(flux_unbinned, axis=1)   ##TODO: Is there a difference between mean and median for others?
-    wl_flux_err = 1.4826 * jnp.nanmedian(jnp.abs(wl_flux - jnp.nanmedian(wl_flux)))
+        wl_flux_err = jnp.nan
+
+    wl_flux = wl_norm  
 
     return SpectroData(
         time=jnp.array(time),
