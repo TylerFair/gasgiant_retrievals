@@ -522,7 +522,7 @@ def main():
             elif detrending_type == 'gp':
                 prior_params_wl['logs2'] = jnp.log(2*jnp.nanmedian(data.wl_flux_err))
                 prior_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
-                prior_params_wl['GP_log_rho'] = jnp.log(1e-1)
+                prior_params_wl['GP_log_rho'] = jnp.log(0.1)
     
             if detrending_type == 'gp':
                 print("Setting platform to 'cpu' for GP whitelight fit.")
