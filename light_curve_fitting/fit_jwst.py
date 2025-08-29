@@ -67,7 +67,7 @@ def compute_lc_explinear(params, t):
 
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
-    return _compute_transit_model(params, t)
+    return (_compute_transit_model(params, t) + 1.0)
 
 def create_whitelight_model(detrend_type='linear'):
     """
