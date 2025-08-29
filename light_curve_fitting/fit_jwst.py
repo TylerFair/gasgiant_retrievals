@@ -995,6 +995,11 @@ def main():
         trend_flux = mu - transit_model_wl
         flux_hr = flux_hr / (trend_flux[~wl_mad_mask] + 1)
         detrend_type_multiwave = 'linear'
+
+        gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+        trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values 
+        flux_hr = jnp.array(data.flux_hr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
+        flux_err_hr = jnp.nanmedian(jnp.abs(jnp.diff(flux_hr)))
     else:
         detrend_type_multiwave = detrending_type
 
