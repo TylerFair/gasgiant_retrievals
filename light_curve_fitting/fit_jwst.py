@@ -24,7 +24,7 @@ from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
 #pd.set_option('display.max_columns', None)
 #pd.set_option('display.max_rows', None)
-
+import tinygp 
 # ---------------------
 # Model Functions
 # ---------------------
@@ -432,8 +432,6 @@ def main():
 
     # flags
     detrending_type = flags.get('detrending_type', 'linear')
-    if detrending_type == 'gp':
-        import tinygp
     interpolate_trend = flags.get('interpolate_trend', False)
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
