@@ -473,7 +473,7 @@ def main():
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
-    if not os.path.exists(spectro_data_file):
+    if not os.path.exists(spectro_data_file) or mask_start is not False:
         data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
         data.save(spectro_data_file)
         print("Shapes:")
