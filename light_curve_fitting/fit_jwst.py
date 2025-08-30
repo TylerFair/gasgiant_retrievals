@@ -630,7 +630,7 @@ def main():
             #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
             plt.scatter(data.wl_time, data.wl_flux, c='r', s=6)
             plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=6)
-            plt.title(f'Whitelight Outliers in Red, WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+            plt.title(f'Whitelight Outlier Rejection Plot (Removed = Red)')
             plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
             plt.show()
             plt.close()
@@ -668,9 +668,9 @@ def main():
             detrended_data = pd.DataFrame({'time': data.wl_time[~wl_mad_mask], 'flux': detrended_flux})
             detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
-    
-            df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
-            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+            if detrending_type == 'gp':
+                df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
+                df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
             #create new save params wl variable with the bestift_params and their uncertainties
             bestfit_params_wl['duration_err'] = jnp.std(wl_samples['duration'], axis=0)
             bestfit_params_wl['t0_err'] = jnp.std(wl_samples['t0'], axis=0)
