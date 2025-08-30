@@ -125,7 +125,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     if mask_start:
         if mask_end == False:
             raise print('Time mask for start time supplied but missing end time! Please give mask_end')
-        if len(mask_start) > 1:
+        if hasattr(mask_start, '__len__'):
             timemask = np.zeros_like(time, dtype=bool)
             for start, end in zip(mask_start, mask_end):
                 timemask |= (time >= start) & (time <= end)
