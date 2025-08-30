@@ -237,6 +237,9 @@ def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None)
     if instrument == 'NIRSPEC/G395H':
         mode = "JWST_NIRSpec_G395H"
         wl_min, wl_max = 28700.0, 51700.0 #29000, 52000  # Angstroms
+    if instrument == 'NIRSPEC/G395M':
+        mode = "JWST_NIRSpec_G395M"
+        wl_min, wl_max = 28700.0, 51700.0 #29000, 52000  # Angstroms
     elif instrument == 'NIRISS/SOSS':
         mode = f"JWST_NIRISS_SOSSo{order}"
         wl_min, wl_max = 8300.0, 28100.0  # Angstroms
