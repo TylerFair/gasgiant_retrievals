@@ -30,9 +30,6 @@ import tinygp
 # ---------------------
 DTYPE = jnp.float64
 
-def _dt(t):
-    return t - jnp.min(t)
-
 def _to_f64(x):
     if isinstance(x, (np.ndarray, jnp.ndarray)) and jnp.issubdtype(jnp.asarray(x).dtype, jnp.floating):
         return jnp.asarray(x, DTYPE)
@@ -45,18 +42,20 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-def spots_term(dt, B, mu, sigma, tmin):
+def spots_term(t, B, mu, sigma):
     """
-    models spot crossing as Gaussian-like. 
+    models spot crossing as Gaussian-like.
     """
     # Ensure 1D (K,) even if scalars or empty
     B     = jnp.atleast_1d(B)
     mu    = jnp.atleast_1d(mu)
     sigma = jnp.atleast_1d(sigma)
+    if B.size == 0:
+        return jnp.zeros_like(t)
 
-    g = jnp.exp(-0.5 * ((dt[None, :] - (mu[:, None] - tmin) / sigma[:, None])**2))
+    g = jnp.exp(-0.5 * ((t[None, :] - mu[:,None])/sigma[:,None])**2)
     # Sum over bumps, sum of size-0 along axis=0 is 0.0
-    return (B[:, None] * g).sum(axis=0) if B.size else jnp.zeros_like(dt)
+    return (B[:, None] * g).sum(axis=0)
     
 def _compute_transit_model(params, t):
     """Transit Model."""
@@ -72,27 +71,26 @@ def _compute_transit_model(params, t):
 def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
     lc_transit = _compute_transit_model(params, t)
-    dt = _dt(t)
-    trend = params["c"] + params["v"] * dt
+    trend = params["c"] + params["v"] * (t - jnp.min(t))
 
-    # Add spotss if present. 
-    B     = params.get("B",     jnp.array([]))
-    mu_spot    = params.get("mu_spot",    jnp.array([]))
-    sigma_spot = params.get("sigma_spot", jnp.array([]))
-    trend = trend + spots_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
+    # Add spotss if present.
+    B     = params.get("B", params.get("spot_amp",jnp.array([])))
+    mu_spot    = params.get("mu_spot", params.get("spot_center",  jnp.array([])))
+    sigma_spot = params.get("sigma_spot", params.get("spot_width", jnp.array([])))
+    trend = trend + spots_term(t, B, mu_spot, sigma_spot)
 
     return (1.0 + lc_transit) * (1.0 + trend)
 
 def compute_lc_explinear(params, t):
     """Computes transit + exponential-linear trend."""
     lc_transit = _compute_transit_model(params, t)
-    dt = _dt(t)
-    ramp = params["A"] * jnp.exp(-dt / params["tau"])
+
+    ramp = params["A"] * jnp.exp(-(t - jnp.min(t)) / params["tau"])
     trend = params["c"] + params["v"] * dt + ramp
-    B     = params.get("B",     jnp.array([]))
-    mu_spot    = params.get("mu_spot",    jnp.array([]))
-    sigma_spot = params.get("sigma_spot", jnp.array([]))
-    trend = trend + spots_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
+    B     = params.get("B", params.get("spot_amp",jnp.array([])))
+    mu_spot    = params.get("mu_spot", params.get("spot_center",  jnp.array([])))
+    sigma_spot = params.get("sigma_spot", params.get("spot_width", jnp.array([])))
+    trend = trend + spots_term(t, B, mu_spot, sigma_spot)
 
     return (1.0 + lc_transit) * (1.0 + trend)
 
