@@ -99,8 +99,8 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         ax.axhline(y=0, color='k', alpha=1, lw=2.8, zorder=3)
         ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.3f} μm',
                 transform=ax.transAxes, fontsize=10)
-        rms = np.std(residuals)
-        ax.text(0.05, 0.85, f'RMS = {rms:.6f}',
+        rms = np.nanmedian(np.abs(np.diff(residuals)))
+        ax.text(0.05, 0.85, f'Noise = {round(rms)}',
                 transform=ax.transAxes, fontsize=8)
         ax.set_xticks([])
         ax.set_yticks([])
