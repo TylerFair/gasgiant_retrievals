@@ -675,16 +675,16 @@ def main():
             bestfit_params_wl['b_err'] = jnp.std(wl_samples['b'], axis=0)
             bestfit_params_wl['rors_err'] = jnp.std(wl_samples['rors'], axis=0)
             bestfit_params_wl['depths_err'] = jnp.std(wl_samples['rors']**2, axis=0)
-            bestfit_params_wl['u_err'] = jnp.std(wl_samples['u'], axis=0)
-            bestfit_params_wl['c_err'] = jnp.std(wl_samples['c'], axis=0)
-            bestfit_params_wl['v_err'] = jnp.std(wl_samples['v'], axis=0)
-            if detrending_type == 'explinear':
-                bestfit_params_wl['A_err'] = jnp.std(wl_samples['A'], axis=0)
-                bestfit_params_wl['tau_err'] = jnp.std(wl_samples['tau'], axis=0)
-            elif detrending_type == 'gp':
-                bestfit_params_wl['logs2_err'] = jnp.std(wl_samples['logs2'], axis=0)
-                bestfit_params_wl['GP_log_sigma_err'] = jnp.std(wl_samples['GP_log_sigma'], axis=0)
-                bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
+            #bestfit_params_wl['u_err'] = jnp.std(wl_samples['u'], axis=0)
+            #bestfit_params_wl['c_err'] = jnp.std(wl_samples['c'], axis=0)
+            #bestfit_params_wl['v_err'] = jnp.std(wl_samples['v'], axis=0)
+            #if detrending_type == 'explinear':
+            #    bestfit_params_wl['A_err'] = jnp.std(wl_samples['A'], axis=0)
+            #    bestfit_params_wl['tau_err'] = jnp.std(wl_samples['tau'], axis=0)
+            #elif detrending_type == 'gp':
+            #    bestfit_params_wl['logs2_err'] = jnp.std(wl_samples['logs2'], axis=0)
+            #    bestfit_params_wl['GP_log_sigma_err'] = jnp.std(wl_samples['GP_log_sigma'], axis=0)
+            #    bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
     
     
             df = pd.DataFrame.from_dict(bestfit_params_wl, orient='index')
