@@ -628,9 +628,9 @@ def main():
     
     
             #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
-            plt.scatter(data.wl_time, data.wl_flux, c='r', s=1)
-            plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=1)
-            plt.title(f'Post-Rejection: WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+            plt.scatter(data.wl_time, data.wl_flux, c='r', s=6)
+            plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=6)
+            plt.title(f'Whitelight Outliers in Red, WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
             plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
             plt.show()
             plt.close()
@@ -659,7 +659,7 @@ def main():
                 detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux + 1.0)
                 planet_model_only = compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
     
-            plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=1)
+            plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=6)
             plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.show()
