@@ -469,7 +469,7 @@ def main():
         M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
         ld_data_path=ld_data_path
     )
-    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRESPEC/G395M' else ''
+    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
