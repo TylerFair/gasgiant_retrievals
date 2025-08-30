@@ -38,7 +38,7 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-t/tau_i)            
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)            
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
@@ -47,7 +47,7 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
                     color=colors[i], label='Data', ms=1, zorder=2)
         ax.plot(t, model, c='k', alpha=1, lw=2.8,
                 label='MAP Model', zorder=3)
-        ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.3f} μm',
+        ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.2f} μm',
                 transform=ax.transAxes, fontsize=10)
         if i == 0:
             ax.legend(fontsize=8)
@@ -87,7 +87,7 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-t/tau_i)            
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)            
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
@@ -99,9 +99,9 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         ax.axhline(y=0, color='k', alpha=1, lw=2.8, zorder=3)
         ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.3f} μm',
                 transform=ax.transAxes, fontsize=10)
-        rms = np.nanmedian(np.abs(np.diff(residuals)))
+        rms = np.nanmedian(np.abs(np.diff(residuals)))*1e6
         ax.text(0.05, 0.85, f'Noise = {round(rms)}',
-                transform=ax.transAxes, fontsize=8)
+                transform=ax.transAxes, fontsize=10)
         ax.set_xticks([])
         ax.set_yticks([])
     plt.savefig(filename, dpi=200)
