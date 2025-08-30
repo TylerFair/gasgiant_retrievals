@@ -438,6 +438,7 @@ def main():
     need_lowres = flags.get('need_lowres', True)
     mask_start = flags.get('mask_start', False)
     mask_end = flags.get('mask_end', False)
+    save_trace = flags.get('save_whitelight_trace', False)
     # binning nm seperation
     high_resolution_bins = bins.get('high', 1)
     low_resolution_bins = bins.get('low', 100)
@@ -503,10 +504,10 @@ def main():
             plt.scatter(data.wl_time, data.wl_flux)
             plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
             plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
-            keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
-            plt.close()
-            if keep_going.lower == 'n':
-                exit()
+            #keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
+            #plt.close()
+            #if keep_going.lower == 'n':
+            #    exit()
             print('Fitting whitelight for outliers and bestfit parameters')
             prior_params_wl = {
                     "duration": PRIOR_DUR, "t0": PRIOR_T0,
@@ -547,7 +548,8 @@ def main():
             )
             mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
             inf_data = az.from_numpyro(mcmc)
-    
+            if save_trace:
+                az.to_netcdf(inf_data, 'whitelight_trace.nc')
             wl_samples = mcmc.get_samples()
     
             if detrending_type == 'gp':
