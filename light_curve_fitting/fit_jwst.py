@@ -660,7 +660,7 @@ def main():
                 planet_model_only = compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
     
             plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=1)
-            plt.title(f'WL Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+            plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.show()
             plt.close()
@@ -744,14 +744,11 @@ def main():
         if detrending_type == 'gp':
             gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
             trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values 
-            # The GP was fit to the white light. We now divide it out from the spectroscopic LCs.
-            #trend_flux = mu - compute_lc_from_params(bestfit_params_wl, time_lr 'gp')
             flux_lr = jnp.array(data.flux_lr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
             temp_err = jnp.nanmedian(jnp.abs(0.5 * (flux_lr[:, :-2] + flux_lr[:, 2:]) - flux_lr[:, 1:-1]), axis=1, keepdims=True)
             flux_err_lr = jnp.repeat(temp_err, flux_lr.shape[1], axis=1)
             assert flux_lr.shape[1] == time_lr.shape[0]
             assert flux_err_lr.shape == flux_lr.shape
-            # After dividing out the GP, we fit a linear trend to the spectroscopic LCs.
             detrend_type_multiwave = 'linear'
         else:
             detrend_type_multiwave = detrending_type
@@ -992,15 +989,13 @@ def main():
     flux_err_hr = jnp.array(data.flux_err_hr[:, ~wl_mad_mask])
 
     if detrending_type == 'gp':
-        transit_model_wl = compute_lc_gp_mean(bestfit_params_wl, data.wl_time)
-        trend_flux = mu - transit_model_wl
-        flux_hr = flux_hr / (trend_flux[~wl_mad_mask] + 1)
-        detrend_type_multiwave = 'linear'
-
         gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-        trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values 
+        trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values
         flux_hr = jnp.array(data.flux_hr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
-        flux_err_hr = jnp.nanmedian(jnp.abs(jnp.diff(flux_hr)))
+        temp_err = jnp.nanmedian(jnp.abs(0.5 * (flux_hr[:, :-2] + flux_hr[:, 2:]) - flux_hr[:, 1:-1]), axis=1, keepdims=True)
+        flux_err_hr = jnp.repeat(temp_err, flux_hr.shape[1], axis=1)
+        assert flux_hr.shape[1] == time_hr.shape[0]
+        assert flux_err_hr.shape == flux_hr.shape
     else:
         detrend_type_multiwave = detrending_type
 
