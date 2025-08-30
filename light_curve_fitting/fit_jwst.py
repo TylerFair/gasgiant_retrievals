@@ -505,7 +505,6 @@ def main():
     if not stringcheck or (detrending_type == 'gp'):
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
             plt.scatter(data.wl_time, data.wl_flux)
-            plt.axvline(PRIOR_T0, c='r', ls='--', lw=2)
             plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
             #keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
             #plt.close()
