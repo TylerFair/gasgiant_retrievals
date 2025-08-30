@@ -745,7 +745,10 @@ def main():
             # The GP was fit to the white light. We now divide it out from the spectroscopic LCs.
             #trend_flux = mu - compute_lc_from_params(bestfit_params_wl, time_lr 'gp')
             flux_lr = jnp.array(data.flux_lr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
-            flux_err_lr = jnp.nanmedian(jnp.abs(jnp.diff(flux_lr)))
+            temp_err = jnp.nanmedian(jnp.abs(0.5 * (flux_lr[:, :-2] + flux_lr[:, 2:]) - flux_lr[:, 1:-1]), axis=1, keepdims=True)
+            flux_err_lr = jnp.repeat(temp_err, flux_lr.shape[1], axis=1)
+            assert flux_lr.shape[1] == time_lr.shape[0]
+            assert flux_err_lr.shape == flux_lr.shape
             # After dividing out the GP, we fit a linear trend to the spectroscopic LCs.
             detrend_type_multiwave = 'linear'
         else:
