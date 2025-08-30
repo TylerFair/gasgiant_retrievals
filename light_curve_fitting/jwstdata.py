@@ -45,22 +45,28 @@ def normalize_flux(flux, flux_err, norm_range=slice(0, 50)):
 
 
 def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bins):
+    # Work in numpy here to avoid jax/jnp <-> numpy mixing issues with external libraries.
     # flux_unbinned is (T, L)
+    wavelengths = np.array(wavelengths)
+    flux_unbinned = np.array(flux_unbinned)
+
     T, L = flux_unbinned.shape
 
     # ---  per-wavelength normalization (sum over time) ---
-    sum_per_lambda = jnp.nansum(flux_unbinned, axis=0, keepdims=True)            
+    sum_per_lambda = np.nansum(flux_unbinned, axis=0, keepdims=True)            
+    # avoid division by zero
+    sum_per_lambda[sum_per_lambda == 0] = np.nan
     flux_norm = flux_unbinned / sum_per_lambda                                     # (T, L)
 
     if T >= 3:
         resid = 0.5 * (flux_norm[:-2, :] + flux_norm[2:, :]) - flux_norm[1:-1, :] 
-        err_per_lambda = jnp.nanmedian(jnp.abs(resid), axis=0)                    
+        err_per_lambda = np.nanmedian(np.abs(resid), axis=0)                    
     else:
-        err_per_lambda = jnp.full((L,), jnp.nan)
+        err_per_lambda = np.full((L,), np.nan)
 
     # Shapes expected by bin_at_resolution: (n_wavelength, n_time)
-    flux_transposed = jnp.array(flux_unbinned.T)                                    # (L, T)
-    flux_err_T = jnp.tile(err_per_lambda[:, None], (1, T))                          # (L, T)
+    flux_transposed = np.array(flux_unbinned.T)                                    # (L, T)
+    flux_err_T = np.tile(err_per_lambda[:, None], (1, T))                          # (L, T)
 
     # --- Low resolution binning ---
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
@@ -81,6 +87,7 @@ def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bin
             wavelengths, flux_transposed, flux_err_T, high_res_bins, method='average'
         )
 
+    # normalize_flux expects numpy arrays
     flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr)
     flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr)
 
@@ -145,14 +152,14 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     )
     
     # --- White light via nansum/median(nansum) + robust error (3-point residual) ---
-    wl_raw = jnp.nansum(flux_unbinned, axis=1)                  
-    wl_norm = wl_raw / jnp.nanmedian(wl_raw)                    
+    wl_raw = np.nansum(flux_unbinned, axis=1)                  
+    wl_norm = wl_raw / np.nanmedian(wl_raw)                    
 
     if wl_norm.shape[0] >= 3:
         wl_resid = 0.5 * (wl_norm[:-2] + wl_norm[2:]) - wl_norm[1:-1]
-        wl_flux_err = jnp.nanmedian(jnp.abs(wl_resid))
+        wl_flux_err = np.nanmedian(np.abs(wl_resid))
     else:
-        wl_flux_err = jnp.nan
+        wl_flux_err = np.nan
 
     wl_flux = wl_norm  
 
