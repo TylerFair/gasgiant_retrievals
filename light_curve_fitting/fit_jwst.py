@@ -62,7 +62,7 @@ def compute_lc_linear(params, t):
 def compute_lc_explinear(params, t):
     """Computes transit + exponential-linear trend."""
     lc_transit = _compute_transit_model(params, t)
-    trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-t / params['tau'])
+    trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-(t-jnp.min(t)) / params['tau'])
     return (1.0 + lc_transit) * (1.0 + trend)
 
 def compute_lc_gp_mean(params, t):
