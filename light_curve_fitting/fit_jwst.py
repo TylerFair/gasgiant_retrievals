@@ -54,7 +54,7 @@ def spots_term(dt, B, mu, sigma, tmin):
     mu    = jnp.atleast_1d(mu)
     sigma = jnp.atleast_1d(sigma)
 
-    g = jnp.exp(-0.5 * ((dt[None, :] - (mu[:, None] - tmin) / sigma[:, None])**2)
+    g = jnp.exp(-0.5 * ((dt[None, :] - (mu[:, None] - tmin) / sigma[:, None])**2))
     # Sum over bumps, sum of size-0 along axis=0 is 0.0
     return (B[:, None] * g).sum(axis=0) if B.size else jnp.zeros_like(dt)
     
