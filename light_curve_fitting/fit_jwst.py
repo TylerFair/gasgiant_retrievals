@@ -79,7 +79,7 @@ def compute_lc_linear(params, t):
     B     = params.get("B",     jnp.array([]))
     mu_spot    = params.get("mu_spot",    jnp.array([]))
     sigma_spot = params.get("sigma_spot", jnp.array([]))
-    trend = trend + bumps_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
+    trend = trend + spots_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
 
     return (1.0 + lc_transit) * (1.0 + trend)
 
@@ -92,7 +92,7 @@ def compute_lc_explinear(params, t):
     B     = params.get("B",     jnp.array([]))
     mu_spot    = params.get("mu_spot",    jnp.array([]))
     sigma_spot = params.get("sigma_spot", jnp.array([]))
-    trend = trend + bumps_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
+    trend = trend + spots_term(dt, B, mu_spot, sigma_spot, jnp.min(t))
 
     return (1.0 + lc_transit) * (1.0 + trend)
 
