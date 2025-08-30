@@ -52,21 +52,11 @@ def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bin
 
     T, L = flux_unbinned.shape
 
-    # ---  per-wavelength normalization (sum over time) ---
-    sum_per_lambda = np.nansum(flux_unbinned, axis=0, keepdims=True)            
-    # avoid division by zero
-    sum_per_lambda[sum_per_lambda == 0] = np.nan
-    flux_norm = flux_unbinned / sum_per_lambda                                     # (T, L)
+    resid = 0.5 * (flux_unbinned[:-2, :] + flux_unbinned[2:, :]) - flux_unbinned[1:-1, :]
+    err_per_lambda = np.nanmedian(np.abs(resid), axis=0)                    
 
-    if T >= 3:
-        resid = 0.5 * (flux_norm[:-2, :] + flux_norm[2:, :]) - flux_norm[1:-1, :] 
-        err_per_lambda = np.nanmedian(np.abs(resid), axis=0)                    
-    else:
-        err_per_lambda = np.full((L,), np.nan)
-
-    # Shapes expected by bin_at_resolution: (n_wavelength, n_time)
-    flux_transposed = np.array(flux_unbinned.T)                                    # (L, T)
-    flux_err_T = np.tile(err_per_lambda[:, None], (1, T))                          # (L, T)
+    flux_transposed = np.array(flux_unbinned.T)                             
+    flux_err_T = np.tile(err_per_lambda[:, None], (1, T))                  
 
     # --- Low resolution binning ---
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
@@ -151,7 +141,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         wavelengths, flux_unbinned, cfg['resolution'].get('low'), cfg['resolution'].get('high')
     )
     
-    # --- White light via nansum/median(nansum) + robust error (3-point residual) ---
+    # --- White light via nansum/median(nansum) Credit: M Radica --- 
     wl_raw = np.nansum(flux_unbinned, axis=1)                  
     wl_norm = wl_raw / np.nanmedian(wl_raw)                    
 
