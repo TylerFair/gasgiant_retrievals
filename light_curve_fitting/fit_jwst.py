@@ -100,7 +100,7 @@ def create_whitelight_model(detrend_type='linear'):
             params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
-            params['tau'] = numpyro.sample('tau', dist.Normal(1.0, 0.5))
+            params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_explinear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
@@ -175,7 +175,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             in_axes.update({'c': 0, 'v': 0})
             if detrend_type == 'explinear':
                 params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                params['tau'] = numpyro.sample('tau', dist.Normal(1.0, 0.5).expand([num_lcs]))
+                params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
                 in_axes.update({'A': 0, 'tau': 0})
         elif trend_mode == 'fixed':
             trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
