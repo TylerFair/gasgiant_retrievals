@@ -42,7 +42,7 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
-        model = (1.0 + model) * (1.0 + trend  )      
+        model = model + trend      
         ax.errorbar(t, indiv_y[i], yerr=yerr[i], fmt='.', alpha=0.3,
                     color=colors[i], label='Data', ms=1, zorder=2)
         ax.plot(t, model, c='k', alpha=1, lw=2.8,
@@ -91,7 +91,7 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
-        model = (1.0 +model) * (1.0 + trend)
+        model = model + trend
         residuals = indiv_y[i] - model
         
         ax.errorbar(t, residuals, yerr=yerr[i], fmt='.', alpha=0.3,
