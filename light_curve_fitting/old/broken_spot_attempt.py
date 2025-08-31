@@ -42,20 +42,8 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-def spots_term(t, B, mu, sigma):
-    """
-    models spot crossing as Gaussian-like.
-    """
-    # Ensure 1D (K,) even if scalars or empty
-    B     = jnp.atleast_1d(B)
-    mu    = jnp.atleast_1d(mu)
-    sigma = jnp.atleast_1d(sigma)
-    if B.size == 0:
-        return jnp.zeros_like(t)
-
-    g = jnp.exp(-0.5 * ((t[None, :] - mu[:,None])/sigma[:,None])**2)
-    # Sum over bumps, sum of size-0 along axis=0 is 0.0
-    return (B[:, None] * g).sum(axis=0)
+def spot_crossing(t, amp, mu, sigma):
+    return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
     
 def _compute_transit_model(params, t):
     """Transit Model."""
@@ -72,41 +60,30 @@ def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
     lc_transit = _compute_transit_model(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t))
-
-    # Add spotss if present.
-    B     = params.get("B", params.get("spot_amp",jnp.array([])))
-    mu_spot    = params.get("mu_spot", params.get("spot_center",  jnp.array([])))
-    sigma_spot = params.get("sigma_spot", params.get("spot_width", jnp.array([])))
-    trend = trend + spots_term(t, B, mu_spot, sigma_spot)
-
     return (1.0 + lc_transit) * (1.0 + trend)
 
 def compute_lc_explinear(params, t):
     """Computes transit + exponential-linear trend."""
     lc_transit = _compute_transit_model(params, t)
-
-    ramp = params["A"] * jnp.exp(-(t - jnp.min(t)) / params["tau"])
-    trend = params["c"] + params["v"] * dt + ramp
-    B     = params.get("B", params.get("spot_amp",jnp.array([])))
-    mu_spot    = params.get("mu_spot", params.get("spot_center",  jnp.array([])))
-    sigma_spot = params.get("sigma_spot", params.get("spot_width", jnp.array([])))
-    trend = trend + spots_term(t, B, mu_spot, sigma_spot)
-
+    trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-(t-jnp.min(t)) / params['tau'])
     return (1.0 + lc_transit) * (1.0 + trend)
-
+    
+def compute_lc_spot(params, t):
+    """Computes transit + spot crossing."""
+    lc_transit = compute_transit_model(params, t)
+    spot = spot_crossing(t, params["spot_amp"], params["spot_mu"], params["spot_sigma"])
+    trend = params["c"] + params["v"] * (t - jnp.min(t))
+    return (1.0 + lc_transit) * (1.0 + trend) * (1.0 + spot)
+    
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
     return (_compute_transit_model(params, t) + 1.0) * (1.0 + params["c"])
 
-def create_whitelight_model(detrend_type='linear', spot_crossing=False, K_spots=0):
+def create_whitelight_model(detrend_type='linear'):
     """
-    Building a static whitelight model so jax doesn't retrace.
+    Building a static whitelight model so jax doesn't retrace. 
     """
-    print(f"Building whitelight model with: detrend_type='{detrend_type}', spots={K_spots}")
-    def _broadcast_to_K(x, K):
-        x = jnp.atleast_1d(x)
-        return jnp.broadcast_to(x, (K,)) if K > 0 else x[:0]
-
+    print(f"Building whitelight model with: detrend_type='{detrend_type}'")
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
         logD = numpyro.sample("logD", dist.Normal(jnp.log(prior_params['duration']), 1e-2))
         duration = numpyro.deterministic("duration", jnp.exp(logD))
@@ -114,8 +91,7 @@ def create_whitelight_model(detrend_type='linear', spot_crossing=False, K_spots=
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
         u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
-        depths = numpyro.sample('depths', dist.TruncatedNormal(
-            prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
+        depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
 
         params = {
@@ -123,49 +99,38 @@ def create_whitelight_model(detrend_type='linear', spot_crossing=False, K_spots=
             "rors": rors, "u": u,
         }
 
+        # The returned model will only contain ONE of these blocks.
         if detrend_type == 'linear':
             params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            lc_model = compute_lc_linear(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
         elif detrend_type == 'explinear':
             params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
             params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1))
-
-        elif detrend_type == 'gp':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
-            params['v'] = 0.0
-            logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
-            GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
-            GP_log_rho   = numpyro.sample('GP_log_rho',   dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
-        else:
-            raise ValueError(f"Unknown detrend_type: {detrend_type}")
-
-        if spot_crossing and K_spots > 0:
-            spot_center = _broadcast_to_K(prior_params['spot_center'], K_spots) 
-            spot_width  = _broadcast_to_K(prior_params['spot_width'],  K_spots) 
-
-            with numpyro.plate("spots_wl", K_spots):
-                B          = numpyro.sample("B",         dist.Normal(0.0, 0.02))
-                mu_spot    = numpyro.sample("mu_spot",   dist.Normal(spot_center, 0.1))
-                sigma_spot = numpyro.sample("sigma_spot",dist.HalfNormal(spot_width))
-        else:
-            B = jnp.array([])
-            mu_spot = jnp.array([])
-            sigma_spot = jnp.array([])
-
-        params["B"], params["mu_spot"], params["sigma_spot"] = B, mu_spot, sigma_spot
-
-        if detrend_type == 'linear':
-            lc_model = compute_lc_linear(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
-
-        elif detrend_type == 'explinear':
             lc_model = compute_lc_explinear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
+        elif detrend_type == 'spot':
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(0.0, 0.01)) # 1 % transit 
+            params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01)) #  15 min uncertainty
+            params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01)) # 15 min half-width
+            lc_model = compute_lc_spot(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+            
         elif detrend_type == 'gp':
+            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['v'] = 0.0 
+
+            logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
+            GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
+            GP_log_rho = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
+
             mean_func = partial(compute_lc_gp_mean, params)
             kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(GP_log_rho),
@@ -173,34 +138,34 @@ def create_whitelight_model(detrend_type='linear', spot_crossing=False, K_spots=
             )
             gp = tinygp.GaussianProcess(kernel, t, diag=jnp.exp(logs2), mean=mean_func)
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
+        else:
+            raise ValueError(f"Unknown detrend_type: {detrend_type}")
 
     return _whitelight_model_static
     
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free',
-                            spot_crossing=False, K_spots=0):
+def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free'):
     """
-    Static vectorized model. Adds hierarchical spots.
+    Build a static vectorized model for individual res calls. 
+    It must be built in this way or else we deal with numerous if statement problems. 
     """
-    print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', "
-          f"trend='{trend_mode}', spots={K_spots}")
+    print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', trend='{trend_mode}'")
 
     if detrend_type == 'linear':
         compute_lc_kernel = compute_lc_linear
     elif detrend_type == 'explinear':
         compute_lc_kernel = compute_lc_explinear
+    elif detrend_type == 'spot':
+        compute_lc_kernel = compute_lc_spot
     elif detrend_type == 'gp':
         compute_lc_kernel = compute_lc_gp_mean
     else:
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
-    def _broadcast_to_K(x, K):
-        x = jnp.atleast_1d(x)
-        return jnp.broadcast_to(x, (K,)) if K > 0 else x[:0]
-
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None,
-                                 mu_depths=None, PERIOD=None, trend_fixed=None,
-                                 ld_interpolated=None, ld_fixed=None,
-                                 mu_mu_spot=None, mu_sigma_spot=None):
+                               mu_depths=None, PERIOD=None, trend_fixed=None,
+                               ld_interpolated=None, ld_fixed=None,
+                               mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None
+                                ):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
@@ -209,8 +174,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-1))
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
-        depths = numpyro.sample('depths', dist.TruncatedNormal(
-            mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
+        depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
 
         if ld_mode == 'free':
@@ -222,7 +186,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         else:
             raise ValueError(f"Unknown ld_mode: {ld_mode}")
 
-        params = {"period": PERIOD, "duration": duration, "t0": t0, "b": b, "rors": rors, "u": u}
+        params = {
+            "period": PERIOD, "duration": duration, "t0": t0, "b": b, "rors": rors, "u": u,
+        }
+
         in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
 
         if trend_mode == 'free':
@@ -230,47 +197,35 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
             in_axes.update({'c': 0, 'v': 0})
             if detrend_type == 'explinear':
-                params['A']   = numpyro.sample('A',   dist.Normal(0.0, 0.1).expand([num_lcs]))
+                params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
                 params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
                 in_axes.update({'A': 0, 'tau': 0})
+            if trend_mode == 'spot':
+                params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
+                params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(mu_spot_mu, 0.01).expand([num_lcs]))
+                params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(mu_spot_sigma, 0.01).expand([num_lcs]))
+                in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
         elif trend_mode == 'fixed':
             trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
             params['c'] = numpyro.deterministic('c', trend_temp[:, 0])
             params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
             in_axes.update({'c': 0, 'v': 0})
             if detrend_type == 'explinear':
-                params['A']   = numpyro.deterministic('A',   trend_temp[:, 2])
+                params['A'] = numpyro.deterministic('A', trend_temp[:, 2])
                 params['tau'] = numpyro.deterministic('tau', trend_temp[:, 3])
                 in_axes.update({'A': 0, 'tau': 0})
-            if spot_crossing and K_spots > 0:
-                params['B'] = numpyro.deterministic('B', trend_temp[:, start:start+K_spots])
-                in_axes.update({'B': 0})
+            if detrend_type == 'spot':
+                params['spot_amp'] = numpyro.deterministic('spot_amp', trend_temp[:, 2])
+                params['spot_mu'] = numpyro.deterministic('spot_mu', trend_temp[:, 3])
+                params['spot_sigma'] = numpyro.deterministic('spot_sigma', trend_temp[:, 4])
+                in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
         else:
             raise ValueError(f"Unknown trend_mode: {trend_mode}")
-
-        # ---- hierarchical spots (shared mu/sigma; per-LC B) ----
-        if spot_crossing and K_spots > 0:
-            mu_mu_spot_b  = _broadcast_to_K(mu_mu_spot,    K_spots)
-            mu_sigma_spot_b = _broadcast_to_K(mu_sigma_spot, K_spots)
-
-            with numpyro.plate("spots_shared", K_spots):
-                mu_spot    = numpyro.sample("mu_spot",    dist.Normal(mu_mu_spot_b, 0.1))
-                sigma_spot = numpyro.sample("sigma_spot", dist.HalfNormal(mu_sigma_spot_b))
-
-            B = numpyro.sample("B", dist.Normal(0.0, 0.02).expand([num_lcs, K_spots]))
-        else:
-            B = jnp.tile(jnp.array([]), (num_lcs, 0))
-            mu_spot = jnp.array([])
-            sigma_spot = jnp.array([])
-
-        params['B'], params['mu_spot'], params['sigma_spot'] = B, mu_spot, sigma_spot
-        in_axes.update({'B': 0, 'mu_spot': None, 'sigma_spot': None})
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
         numpyro.sample('obs', dist.Normal(y_model, yerr), obs=y)
 
     return _vectorized_model_static
-
     
 def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
     """
@@ -517,28 +472,17 @@ def main():
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
     need_lowres = flags.get('need_lowres', True)
-
-    # time flagging mask for spots to cut them
     mask_start = flags.get('mask_start', False)
     mask_end = flags.get('mask_end', False)
-
-    # spot parameter for spots to fit them 
-    raw_spot_time  = flags.get('spot_time', 0)    
-    raw_spot_width = flags.get('spot_width', 0)
-    spot_time_arr  = jnp.atleast_1d(raw_spot_time)  if raw_spot_time  is not None else jnp.array([])
-    spot_width_arr = jnp.atleast_1d(raw_spot_width) if raw_spot_width is not None else jnp.array([])
-    if (spot_time_arr.size == 1) and (spot_time_arr[0] == 0):
-        spot_time_arr = jnp.array([])
-    if (spot_width_arr.size == 1) and (spot_width_arr[0] == 0):
-        spot_width_arr = jnp.array([])
-    K_spots = int(spot_time_arr.size) 
-
+    spot_amp = flags.get('spot_amp', 0.0)
+    spot_mu = flags.get('spot_center', 0.0)
+    spot_sigma = flags.get('spot_width', 0.0)
+    
     save_trace = flags.get('save_whitelight_trace', False)
     
-    
-    # binning resolution
-    high_resolution_bins = bins.get('high', 'native')
-    low_resolution_bins = bins.get('low', 40)
+    # binning nm seperation
+    high_resolution_bins = bins.get('high', 1)
+    low_resolution_bins = bins.get('low', 100)
 
     # outlier clipping
     whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
@@ -551,7 +495,7 @@ def main():
     PRIOR_B = planet_cfg['b']
     PRIOR_RPRS = planet_cfg['rprs']
     PRIOR_DEPTH = PRIOR_RPRS ** 2
-            
+
     # stellar parameters
     stellar_feh = stellar_cfg['feh']
     stellar_teff = stellar_cfg['teff']
@@ -563,11 +507,11 @@ def main():
         M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
         ld_data_path=ld_data_path
     )
-    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRESPEC/G395M' else ''
+    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
-    if not os.path.exists(spectro_data_file):
+    if not os.path.exists(spectro_data_file) or mask_start is not False:
         data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
         data.save(spectro_data_file)
         print("Shapes:")
@@ -587,6 +531,7 @@ def main():
     COMPUTE_KERNELS = {
     'linear': compute_lc_linear,
     'explinear': compute_lc_explinear,
+    'spot': compute_lc_spot,
      'gp': compute_lc_gp_mean }
 
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
@@ -612,15 +557,15 @@ def main():
                  'logD': jnp.log(PRIOR_DUR), 'b': PRIOR_B, 'depths': PRIOR_DEPTH,
                  'c': 0.0, 'v': 0.0,
                 }
-            if K_spots > 0:
-                if spot_width_arr.size == 0:
-                    spot_width_arr = (PRIOR_DUR / 8.0) * jnp.ones((K_spots,))
-                prior_params_wl['spot_center'] = spot_time_arr
-                prior_params_wl['spot_width']  = spot_width_arr
-                    
+    
             if detrending_type == 'explinear':
                 prior_params_wl['A'] = 0.0
                 prior_params_wl['tau'] = 0.5
+            if detrending_type == 'spot':
+                prior_params_wl['spot_amp'] = spot_amp
+                prior_params_wl['spot_mu'] = spot_mu
+                prior_params_wl['spot_sigma'] = spot_sigma
+                prior_params_wl['spot_guess'] = spot_mu
             elif detrending_type == 'gp':
                 prior_params_wl['logs2'] = jnp.log(2*jnp.nanmedian(data.wl_flux_err))
                 prior_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
@@ -630,13 +575,14 @@ def main():
                 print("Setting platform to 'cpu' for GP whitelight fit.")
                 numpyro.set_platform('cpu')
     
-            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, spot_crossing=(K_spots > 0), K_spots=K_spots)
+            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
             #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
             soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
             
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(
                     whitelight_model_for_run,
+                 #   partial(whitelight_model, detrend_type=detrending_type),
                     regularize_mass_matrix=False,
                     init_strategy=numpyro.infer.init_to_value(values=soln),
                     target_accept_prob=0.9,
@@ -666,22 +612,23 @@ def main():
             if detrending_type == 'explinear':
                 bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
                 bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+            if detrending_type == 'spot':
+                bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
+                bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
+                bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
             elif detrending_type == 'gp':
                 bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
                 bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
                 bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
-            
-            has_spots = ('B' in wl_samples) and ('mu_spot' in wl_samples) and ('sigma_spot' in wl_samples)
-            if has_spots:
-                bestfit_params_wl['B']          = jnp.nanmedian(wl_samples['B'], axis=0)         
-                bestfit_params_wl['mu_spot']    = jnp.nanmedian(wl_samples['mu_spot'], axis=0)  
-                bestfit_params_wl['sigma_spot'] = jnp.nanmedian(wl_samples['sigma_spot'], axis=0) 
+    
     
             #wl_transit_model = compute_lc_from_params(bestfit_params_wl, data.wl_time, detrending_type)
             if detrending_type == 'linear':
                 wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
             if detrending_type == 'explinear':
                 wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
+            if detrending_type == 'spot':
+                wl_transit_model = compute_lc_spot(bestfit_params_wl, data.wl_time)
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -740,30 +687,12 @@ def main():
             plt.show()
             plt.close()
     
-            if detrending_type == 'linear' or detrending_type == 'explinear':
-                t_mask   = data.wl_time[~wl_mad_mask]
-                tmin     = jnp.min(t_mask)
-                dt_mask  = t_mask - tmin
-            
-                base = bestfit_params_wl["c"] + bestfit_params_wl["v"] * dt_mask
-                if detrending_type == 'explinear':
-                    base = base + bestfit_params_wl['A'] * jnp.exp(-dt_mask / bestfit_params_wl['tau'])
-            
-                if has_spots:
-                    B   = jnp.atleast_1d(bestfit_params_wl['B'])
-                    mu  = jnp.atleast_1d(bestfit_params_wl['mu_spot'])      
-                    sig = jnp.atleast_1d(bestfit_params_wl['sigma_spot'])
-                    if B.size > 0:
-                        mu_dt = (mu - tmin)[:, None]                     
-                        z = (dt_mask[None, :] - mu_dt) / sig[:, None]      
-                        g = jnp.exp(-0.5 * z**2)
-                        spot_term = (B[:, None] * g).sum(axis=0)          
-                    else:
-                        spot_term = jnp.zeros_like(dt_mask)
-                    base = base + spot_term
-            
-                detrended_flux = data.wl_flux[~wl_mad_mask] / (1.0 + base)
-
+            if detrending_type == 'linear':
+                compute_lc_linear(bestfit_params_wl, data.wl_time[~wl_mad_mask)
+            if detrending_type == 'explinear': 
+                compute_lc_explinear(bestfit_params_wl, data.wl_time[~wl_mad_mask)
+            if detrending_type == 'spot': 
+                compute_lc_spot(bestfit_params_wl, data.wl_time[~wl_mad_mask)
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -801,59 +730,23 @@ def main():
             bestfit_params_wl['b_err'] = jnp.std(wl_samples['b'], axis=0)
             bestfit_params_wl['rors_err'] = jnp.std(wl_samples['rors'], axis=0)
             bestfit_params_wl['depths_err'] = jnp.std(wl_samples['rors']**2, axis=0)
-
-            has_spots = ('mu_spot' in wl_samples) and ('sigma_spot' in wl_samples)
-            if has_spots:
-                B_mean = jnp.nanmean(wl_samples['B'], axis=0)
-                mu_mean  = jnp.nanmean(wl_samples['mu_spot'], axis=0)  
-                sig_mean = jnp.nanmean(wl_samples['sigma_spot'], axis=0) 
-            
-                order    = jnp.argsort(mu_mean)
-                B_mean = B_mean[order]
-                mu_mean  = mu_mean[order]
-                sig_mean = sig_mean[order]
-                K        = int(mu_mean.size)
-            
-                bestfit_params_wl['K_spots'] = K
-            else:
-                bestfit_params_wl['K_spots'] = 0
-                B_mean = jnp.array([])
-                mu_mean  = jnp.array([])
-                sig_mean = jnp.array([])
-            
-            to_save = {
-                'duration': bestfit_params_wl['duration'],
-                't0':       bestfit_params_wl['t0'],
-                'b':        bestfit_params_wl['b'],
-                'rors':     bestfit_params_wl['rors'],
-                'period':   bestfit_params_wl['period'],
-                'c':        bestfit_params_wl['c'],
-                'v':        bestfit_params_wl['v'],
-                'duration_err': bestfit_params_wl['duration_err'],
-                't0_err':       bestfit_params_wl['t0_err'],
-                'b_err':        bestfit_params_wl['b_err'],
-                'rors_err':     bestfit_params_wl['rors_err'],
-                'depths_err':   bestfit_params_wl['depths_err'],
-                'K_spots':      bestfit_params_wl['K_spots'],
-            }
-            if 'u' in bestfit_params_wl: to_save['u'] = bestfit_params_wl['u']
-            
-            if 'A' in bestfit_params_wl:   to_save['A']   = bestfit_params_wl['A']
-            if 'tau' in bestfit_params_wl: to_save['tau'] = bestfit_params_wl['tau']
-            
-            for k in ['logs2','GP_log_sigma','GP_log_rho']:
-                if k in bestfit_params_wl: to_save[k] = bestfit_params_wl[k]
-            
-            for k in range(int(mu_mean.size)):
-                to_save[f'B_spot_{k}']     = float(B_mean[k])
-                to_save[f'mu_spot_{k}']    = float(mu_mean[k])
-                to_save[f'sigma_spot_{k}'] = float(sig_mean[k])
-                
-                
-            df = pd.DataFrame.from_dict(to_save, orient='index').transpose()
+ 
+            #bestfit_params_wl['u_err'] = jnp.std(wl_samples['u'], axis=0)
+            #bestfit_params_wl['c_err'] = jnp.std(wl_samples['c'], axis=0)
+            #bestfit_params_wl['v_err'] = jnp.std(wl_samples['v'], axis=0)
+            #if detrending_type == 'explinear':
+            #    bestfit_params_wl['A_err'] = jnp.std(wl_samples['A'], axis=0)
+            #    bestfit_params_wl['tau_err'] = jnp.std(wl_samples['tau'], axis=0)
+            #elif detrending_type == 'gp':
+            #    bestfit_params_wl['logs2_err'] = jnp.std(wl_samples['logs2'], axis=0)
+            #    bestfit_params_wl['GP_log_sigma_err'] = jnp.std(wl_samples['GP_log_sigma'], axis=0)
+            #    bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
+    
+    
+            df = pd.DataFrame.from_dict(bestfit_params_wl, orient='index')
+            df = df.transpose()
             df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-
             bestfit_params_wl = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
     
     
@@ -862,29 +755,11 @@ def main():
             B_BASE = jnp.array(bestfit_params_wl['b'][0])
             RORS_BASE = jnp.array(bestfit_params_wl['rors'][0])
             DEPTH_BASE = RORS_BASE**2
-            mu_cols    = sorted(
-                [c for c in bestfit_params_wl.columns if c.startswith('mu_spot_')],
-                key=lambda s: int(s.split('_')[-1])
-            )
-            sigma_cols = sorted(
-                [c for c in bestfit_params_wl.columns if c.startswith('sigma_spot_')],
-                key=lambda s: int(s.split('_')[-1])
-            )
+            if detrending_type == 'spot':
+                SPOT_AMP_BASE = jnp.array(bestfit_params_wl['spot_amp'][0])
+                SPOT_MU_BASE = jnp.array(bestfit_params_wl['spot_mu'][0])
+                SPOT_SIGMA_BASE = jnp.array(bestfit_params_wl['spot_sigma'][0])
 
-            b_cols = sorted(
-                [c for c in bestfit_params_wl.columns if c.startswith('B_spot_')],
-                key=lambda s: int(s.split('_')[-1])
-            )
-            if mu_cols and (len(mu_cols) == len(sigma_cols)):
-                B_SPOT_BASE = jnp.array(bestfit_params_wl.loc[0, b_cols].astype(float).to_numpy())
-                MU_SPOT_BASE   = jnp.array(bestfit_params_wl.loc[0, mu_cols].astype(float).to_numpy())
-                MU_SIGMA_BASE  = jnp.array(bestfit_params_wl.loc[0, sigma_cols].astype(float).to_numpy())
-                K_spots        = int(MU_SPOT_BASE.size)
-            else:
-                B_SPOT_BASE = jnp.array([])
-                MU_SPOT_BASE   = jnp.array([])
-                MU_SIGMA_BASE  = jnp.array([])
-                K_spots        = 0
         else:
             print(f'GP trends already exist... If you want to refit GP on whitelight please remove {output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
     else:
@@ -896,30 +771,10 @@ def main():
         B_BASE = jnp.array(bestfit_params_wl['b'][0])
         RORS_BASE = jnp.array(bestfit_params_wl['rors'][0])
         DEPTH_BASE = RORS_BASE**2
-        mu_cols    = sorted(
-            [c for c in bestfit_params_wl.columns if c.startswith('mu_spot_')],
-            key=lambda s: int(s.split('_')[-1])
-        )
-        sigma_cols = sorted(
-            [c for c in bestfit_params_wl.columns if c.startswith('sigma_spot_')],
-            key=lambda s: int(s.split('_')[-1])
-        )
-        
-        b_cols = sorted(
-                [c for c in bestfit_params_wl.columns if c.startswith('B_spot_')],
-                key=lambda s: int(s.split('_')[-1])
-            )
-        if mu_cols and (len(mu_cols) == len(sigma_cols)):
-            B_SPOT_BASE = jnp.array(bestfit_params_wl.loc[0, b_cols].astype(float).to_numpy())
-            MU_SPOT_BASE   = jnp.array(bestfit_params_wl.loc[0, mu_cols].astype(float).to_numpy())
-            MU_SIGMA_BASE  = jnp.array(bestfit_params_wl.loc[0, sigma_cols].astype(float).to_numpy())
-            K_spots        = int(MU_SPOT_BASE.size)
-        else:
-            B_SPOT_BASE = jnp.array([])
-            MU_SPOT_BASE   = jnp.array([])
-            MU_SIGMA_BASE  = jnp.array([])
-            K_spots        = 0
-            
+        if detrending_type == 'spot':
+            SPOT_AMP_BASE = jnp.array(bestfit_params_wl['spot_amp'][0])
+            SPOT_MU_BASE = jnp.array(bestfit_params_wl['spot_mu'][0])
+            SPOT_SIGMA_BASE = jnp.array(bestfit_params_wl['spot_sigma'][0])
     key_lr, key_hr, key_map_lr, key_mcmc_lr, key_map_hr, key_mcmc_hr, key_prior_pred = jax.random.split(key_master, 7)
 
     need_lowres_analysis = interpolate_trend or interpolate_ld or need_lowres
@@ -934,6 +789,9 @@ def main():
     best_poly_coeffs_u2 = None
     best_poly_coeffs_A = None
     best_poly_coeffs_tau = None
+    best_poly_coeffs_spot_amp = None
+    best_poly_coeffs_spot_mu = None
+    best_poly_coeffs_spot_sigma = None
 
 
 
@@ -995,12 +853,15 @@ def main():
         if detrend_type_multiwave == 'explinear':
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl['A'][0])
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl['tau'][0])
-        K_spots = int(MU_SPOT_BASE.size) if 'MU_SPOT_BASE' in locals() else 0
-        if K_spots > 0:
-            init_params_lr['B']          = jnp.broadcast_to(B_SPOT_BASE, (num_lcs_lr, K_spots))
-            init_params_lr['mu_spot']    = MU_SPOT_BASE          
-            init_params_lr['sigma_spot'] = MU_SIGMA_BASE       
+        if detrend_type_multiwave == 'spot':
+            init_params_lr['spot_amp'] = jnp.full(num_lcs_lr, bestfit_params_wl['spot_amp'][0])
+            init_params_lr['spot_mu'] = jnp.full(num_lcs_lr, bestfit_params_wl['spot_mu'][0])
+            init_params_lr['spot_sigma'] = jnp.full(num_lcs_lr, bestfit_params_wl['spot_sigma'][0])
+
         print("Sampling low-res model using MCMC to find median coefficients...")
+        #samples_lr = get_samples(
+        #    partial(vectorized_model, mu_duration=DURATION_BASE, mu_t0=T0_BASE, mu_depths=DEPTHS_BASE_LR, PERIOD=PERIOD_FIXED, detrend_type=detrend_type_multiwave),
+        #    key_mcmc_lr, time_lr, flux_err_lr, flux_lr, init_params_lr,)
 
         lr_trend_mode = 'free' 
         
@@ -1012,9 +873,7 @@ def main():
         lr_model_for_run = create_vectorized_model(
             detrend_type=detrend_type_multiwave, 
             ld_mode=lr_ld_mode,
-            trend_mode=lr_trend_mode,
-            spot_crossing=(K_spots > 0),
-            K_spots=K_spots,
+            trend_mode=lr_trend_mode
         )
         
         
@@ -1026,10 +885,11 @@ def main():
         }
         if lr_ld_mode == 'fixed':
             model_run_args_lr['ld_fixed'] = U_mu_lr
-        if K_spots > 0:
-            model_run_args_lr['mu_mu_spot']    = MU_SPOT_BASE
-            model_run_args_lr['mu_sigma_spot'] = MU_SIGMA_BASE
-        
+        if detrending_type == 'spot':
+            model_run_args_lr['mu_spot_amp'] = SPOT_AMP_BASE
+            model_run_args_lr['mu_spot_mu'] = SPOT_MU_BASE
+            model_run_args_lr['mu_spot_sigma'] = SPOT_SIGMA_BASE
+
         samples_lr = get_samples(
             model=lr_model_for_run,
             key=key_mcmc_lr,       
@@ -1046,6 +906,10 @@ def main():
         if detrend_type_multiwave == 'explinear':
             trend_A_lr = np.array(samples_lr["A"])
             trend_tau_lr = np.array(samples_lr["tau"])
+        if detrend_type_multiwave == 'spot':
+            trend_spot_amp_lr = np.array(samples_lr["spot_amp"])
+            trend_spot_mu_lr = np.array(samples_lr["spot_mu"])
+            trend_spot_sigma_lr = np.array(samples_lr["spot_sigma"])
 
         map_params_lr = {
             "duration": jnp.nanmedian(samples_lr["duration"]),
@@ -1059,11 +923,10 @@ def main():
         if detrend_type_multiwave == 'explinear':
             map_params_lr['A'] = jnp.nanmedian(samples_lr['A'], axis=0)
             map_params_lr['tau'] = jnp.nanmedian(samples_lr['tau'], axis=0)
-        if K_spots > 0 and ("B" in samples_lr and "mu_spot" in samples_lr and "sigma_spot" in samples_lr):
-            map_params_lr['B']          = jnp.nanmedian(samples_lr['B'], axis=0)          
-            map_params_lr['mu_spot']    = jnp.nanmedian(samples_lr['mu_spot'], axis=0)   
-            map_params_lr['sigma_spot'] = jnp.nanmedian(samples_lr['sigma_spot'], axis=0) 
-
+        if detrend_type_multiwave == 'spot':
+            map_params_lr['spot_amp'] = jnp.nanmedian(samples_lr['spot_amp'], axis=0)
+            map_params_lr['spot_mu'] = jnp.nanmedian(samples_lr['spot_mu'], axis=0)
+            map_params_lr['spot_sigma'] = jnp.nanmedian(samples_lr['spot_sigma'], axis=0)
 
         
         try:
@@ -1079,9 +942,8 @@ def main():
         }
         if detrend_type_multiwave == 'explinear':
             in_axes_map.update({'A': 0, 'tau': 0})
-        if K_spots > 0 and ('B' in map_params_lr):
-            in_axes_map.update({'B': 0, 'mu_spot': None, 'sigma_spot': None})
-
+        if detrend_type_multiwave == 'spot':
+            in_axes_map.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
         final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
             
         model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
@@ -1152,33 +1014,25 @@ def main():
         best_poly_coeffs_c, best_order_c, _ = fit_polynomial(wl_lr, trend_c_lr, poly_orders)
         best_poly_coeffs_v, best_order_v, _ = fit_polynomial(wl_lr, trend_v_lr, poly_orders)
         print(f"Selected polynomial degrees: c={best_order_c}, v={best_order_v}")
-        if detrend_type_multiwave == 'explinear':
-            best_poly_coeffs_A, best_order_A, _ = fit_polynomial(wl_lr, trend_A_lr, poly_orders)
-            best_poly_coeffs_tau, best_order_tau, _ = fit_polynomial(wl_lr, trend_tau_lr, poly_orders)
-            print(f"Selected polynomial degrees: A={best_order_A}, tau={best_order_tau}")
-        best_poly_coeffs_B = []
-        best_order_B = []
-        if K_spots > 0 and ('B' in samples_lr):
-            B_med_lr = np.nanmedian(np.array(samples_lr['B']), axis=0)
-        
-            for k in range(K_spots):
-                coeffs_Bk, order_Bk, _ = fit_polynomial(wl_lr, B_med_lr[:, k], poly_orders)
-                best_poly_coeffs_B.append(coeffs_Bk)
-                best_order_B.append(order_Bk)
-                print(f"Selected polynomial degree for B[{k}] = {order_Bk}")
-        
-                plot_poly_fit(
-                    wl_lr, B_med_lr[:, k], coeffs_Bk, order_Bk,
-                    "Wavelength (μm)", f"Spot amplitude B[{k}]",
-                    f"B[{k}] Polynomial Fit",
-                    f"{output_dir}/2optionalB_{instrument_full_str}_R{low_resolution_bins}_B{k}_interp.png"
-                )
         plot_poly_fit(wl_lr, trend_c_lr, best_poly_coeffs_c, best_order_c,
                         "Wavelength (μm)", "Trend coefficient c", "Trend Offset (c) Polynomial Fit",
                         f"{output_dir}/2optional1_{instrument_full_str}_R{low_resolution_bins}_cinterp.png")
         plot_poly_fit(wl_lr, trend_v_lr, best_poly_coeffs_v, best_order_v,
                         "Wavelength (μm)", "Trend coefficient v", "Trend Slope (v) Polynomial Fit",
                         f"{output_dir}/2optional2_{instrument_full_str}_R{low_resolution_bins}_vinterp.png")
+        
+        if detrend_type_multiwave == 'explinear':
+            best_poly_coeffs_A, best_order_A, _ = fit_polynomial(wl_lr, trend_A_lr, poly_orders)
+            best_poly_coeffs_tau, best_order_tau, _ = fit_polynomial(wl_lr, trend_tau_lr, poly_orders)
+            print(f"Selected polynomial degrees: A={best_order_A}, tau={best_order_tau}")
+
+        if detrend_type_multiwave == 'spot':
+            best_poly_coeffs_spot_amp, best_order_spot_amp, _ = fit_polynomial(wl_lr, trend_spot_amp_lr, poly_orders)
+            best_poly_coeffs_spot_mu, best_order_spot_mu, _ = fit_polynomial(wl_lr, trend_spot_mu_lr, poly_orders)
+            best_poly_coeffs_spot_sigma, best_order_spot_sigma, _ = fit_polynomial(wl_lr, trend_spot_sigma_lr, poly_orders)
+            print(f"Selected polynomial degrees: spot amp={best_order_spot_amp}, spot mu={best_order_spot_mu}, spot sigma={best_order_spot_sigma}")
+            
+
 
         if interpolate_ld:
             print("Fitting polynomials to limb darkening coefficients...")
@@ -1290,79 +1144,55 @@ def main():
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
         print("HR Run Config: FITTING for limb darkening (free).")
     
-    
     if hr_trend_mode == 'fixed':
         c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
         v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
         trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr))
-    
         if detrend_type_multiwave == 'explinear':
-            A_interp_hr   = np.polyval(best_poly_coeffs_A, wl_hr)
+            A_interp_hr = np.polyval(best_poly_coeffs_A, wl_hr)
             tau_interp_hr = np.polyval(best_poly_coeffs_tau, wl_hr)
-            trend_fixed_hr = np.column_stack((trend_fixed_hr, A_interp_hr, tau_interp_hr))
-    
-        # Spots: only in fixed mode do we append B columns to trend_fixed
-        K_spots = int(MU_SPOT_BASE.size) if 'MU_SPOT_BASE' in locals() else 0
-        if K_spots > 0:
-            if 'best_poly_coeffs_B' in locals() and len(best_poly_coeffs_B) == K_spots:
-                B_interp_hr = np.column_stack([
-                    np.polyval(best_poly_coeffs_B[k], wl_hr) for k in range(K_spots)
-                ]).astype(np.float64)
-            else:
-                # neutral fallback if B polynomials weren’t computed
-                B_interp_hr = np.zeros((len(wl_hr), K_spots), dtype=np.float64)
-    
-            trend_fixed_hr = np.column_stack((trend_fixed_hr, B_interp_hr))
-    
+            trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr, A_interp_hr, tau_interp_hr))
+        if detrend_type_multiwave == 'spot':
+            spot_amp_interp_hr = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
+            spot_mu_interp_hr = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
+            spot_sigma_interp_hr = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
+            trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr, spot_amp_interp_hr, spot_mu_interp_hr, spot_sigma_interp_hr))
+        
         model_run_args_hr['trend_fixed'] = jnp.array(trend_fixed_hr)
         print("HR Run Config: Using FIXED (interpolated) trend.")
-    else:  # hr_trend_mode == 'free'
+    else: # hr_trend_mode == 'free'
         print("HR Run Config: FITTING for trend (free).")
     
-    # Common args after the fixed/free branch
     model_run_args_hr['mu_duration'] = DURATION_BASE
-    model_run_args_hr['mu_t0']       = T0_BASE
-    model_run_args_hr['mu_depths']   = DEPTHS_BASE_HR
-    model_run_args_hr['PERIOD']      = PERIOD_FIXED
-    
+    model_run_args_hr['mu_t0'] = T0_BASE
+    model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
+    model_run_args_hr['PERIOD'] = PERIOD_FIXED
+    if detrending_type == 'spot':
+        model_run_args_hr['mu_spot_amp'] = SPOT_AMP_BASE
+        model_run_args_hr['mu_spot_mu'] = SPOT_MU_BASE
+        model_run_args_hr['mu_spot_sigma'] = SPOT_SIGMA_BASE
+        
     init_params_hr = {
         "logD": jnp.log(DURATION_BASE), "t0": T0_BASE, "_b": B_BASE,
         "depths": DEPTHS_BASE_HR,
         "u": U_mu_hr_init,
     }
-    
     if hr_trend_mode == 'free':
         init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
         init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
         if detrend_type_multiwave == 'explinear':
-            init_params_hr["A"]   = np.polyval(best_poly_coeffs_A, wl_hr)
+            init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
             init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
-    
-        # seed B inits in free mode (optional but helpful)
-        K_spots = int(MU_SPOT_BASE.size) if 'MU_SPOT_BASE' in locals() else 0
-        if K_spots > 0:
-            if 'best_poly_coeffs_B' in locals() and len(best_poly_coeffs_B) == K_spots:
-                B_interp_hr = np.column_stack([
-                    np.polyval(best_poly_coeffs_B[k], wl_hr) for k in range(K_spots)
-                ]).astype(np.float64)
-            else:
-                B_interp_hr = np.zeros((len(wl_hr), K_spots), dtype=np.float64)
-            init_params_hr["B"] = B_interp_hr  # (num_lcs_hr, K_spots)
-    
-    # Build model (enable spots if present)
-    K_spots = int(MU_SPOT_BASE.size) if 'MU_SPOT_BASE' in locals() else 0
+        if detrend_type_multiwave == 'spot':
+            init_params_hr["spot_amp"] = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
+            init_params_hr["spot_mu"] = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
+            init_params_hr["spot_sigma"] = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
+
     hr_model_for_run = create_vectorized_model(
         detrend_type=detrend_type_multiwave,
         ld_mode=hr_ld_mode,
-        trend_mode=hr_trend_mode,
-        spot_crossing=(K_spots > 0),
-        K_spots=K_spots,
+        trend_mode=hr_trend_mode
     )
-    
-    # Pass shared spot priors
-    if K_spots > 0:
-        model_run_args_hr['mu_mu_spot']    = MU_SPOT_BASE
-        model_run_args_hr['mu_sigma_spot'] = MU_SIGMA_BASE
     
     samples_hr = get_samples(
         model=hr_model_for_run,
@@ -1371,7 +1201,7 @@ def main():
         yerr=flux_err_hr,
         indiv_y=flux_hr,
         init_params=init_params_hr,
-        **model_run_args_hr
+        **model_run_args_hr 
     )
 
     print("Plotting and saving final transmission spectrum...")
