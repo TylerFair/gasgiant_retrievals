@@ -29,7 +29,7 @@ class SpectroData:
         df = pd.DataFrame({'time': self.wl_time, 'flux': self.wl_flux, 'flux_err': self.wl_flux_err})
         df.to_csv(output_path, index=False)
 
-def normalize_flux(flux, flux_err, norm_range=slice(0, 50)):
+def normalize_flux(flux, flux_err, norm_range):
     """Normalize flux arrays by median of first 50 points."""
     flux = np.array(flux)
     flux_err = np.array(flux_err)
@@ -37,49 +37,47 @@ def normalize_flux(flux, flux_err, norm_range=slice(0, 50)):
     flux_err_norm = flux_err * 1.0
     
     for i in range(flux.shape[0]):
-        norm = np.nanmedian(flux[i, norm_range])
+        if norm_range is None or np.sum(norm_range) == 0:
+            norm_range_fallback = slice(0,150)
+            norm = np.nanmedian(flux[i, norm_range_fallback])
+        else:
+            norm = np.nanmedian(flux[i, norm_range])
         flux_norm[i, :] /= norm
         flux_err_norm[i, :] /= norm
         
     return flux_norm, flux_err_norm
 
 
-def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bins):
-    # Work in numpy here to avoid jax/jnp <-> numpy mixing issues with external libraries.
-    # flux_unbinned is (T, L)
-    wavelengths = np.array(wavelengths)
-    flux_unbinned = np.array(flux_unbinned)
-
-    T, L = flux_unbinned.shape
-
-    resid = 0.5 * (flux_unbinned[:-2, :] + flux_unbinned[2:, :]) - flux_unbinned[1:-1, :]
-    err_per_lambda = np.nanmedian(np.abs(resid), axis=0)                    
-
-    flux_transposed = np.array(flux_unbinned.T)                             
-    flux_err_T = np.tile(err_per_lambda[:, None], (1, T))                  
-
-    # --- Low resolution binning ---
+def bin_spectroscopy_data(wavelengths, flux_unbinned, low_res_bins, high_res_bins, oot_mask):
+    """Handle all the binning logic in one place."""
+    # Transpose flux for binning: (n_time, n_wavelength) -> (n_wavelength, n_time)
+    flux_transposed = jnp.array(flux_unbinned.T)
+    flux_err =  np.nanmedian(np.abs(0.5*(flux_transposed[:, 0:-2] + wl_flux[:, 2:]) - wl_flux[:, 1:-1]))
+    
+    # Low resolution binning
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
-        wavelengths, flux_transposed, flux_err_T, low_res_bins, method='average'
+        wavelengths, flux_transposed, flux_err, low_res_bins, method='sum'
     )
-
-    # --- High resolution binning ---
+ 
+    
+    # High resolution binning
     if high_res_bins == 'native':
+        # Use unbinned data - create bin edges
         bin_edges = np.zeros(len(wavelengths) + 1)
         bin_edges[1:-1] = (wavelengths[:-1] + wavelengths[1:]) / 2
         bin_edges[0] = wavelengths[0] - (wavelengths[1] - wavelengths[0]) / 2
         bin_edges[-1] = wavelengths[-1] + (wavelengths[-1] - wavelengths[-2]) / 2
         wl_err_hr = (bin_edges[1:] - bin_edges[:-1]) / 2
-
-        wl_hr, flux_hr, flux_err_hr = wavelengths, flux_transposed, flux_err_T
+        
+        wl_hr, flux_hr, flux_err_hr = wavelengths, flux_transposed, flux_err
     else:
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
-            wavelengths, flux_transposed, flux_err_T, high_res_bins, method='average'
+            wavelengths, flux_transposed, flux_err, high_res_bins, method='sum'
         )
-
-    # normalize_flux expects numpy arrays
-    flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr)
-    flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr)
+    
+    # Normalize both
+    flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr, norm_range=oot_mask)
+    flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr, norm_range=oot_mask)
 
     return {
         'wavelengths_lr': wl_lr, 'wavelengths_err_lr': wl_err_lr, 
@@ -136,22 +134,26 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
             time = time[~timemask]
             flux_unbinned = flux_unbinned[~timemask, :]
     
+    planet_cfg = cfg['planet']
+    prior_t0 = planet_cfg['t0']
+    prior_duration = planet_cfg['duration']
+    oot_mask = (time < prior_t0 - 0.6 * prior_duration) | (time > prior_t0 + 0.6 * prior_duration)
+
     # Do all the binning
     binned_data = bin_spectroscopy_data(
-        wavelengths, flux_unbinned, cfg['resolution'].get('low'), cfg['resolution'].get('high')
+        wavelengths, flux_unbinned, cfg['resolution'].get('low'), cfg['resolution'].get('high'), oot_mask
     )
     
-    # --- White light via nansum/median(nansum) Credit: M Radica --- 
-    wl_raw = np.nansum(flux_unbinned, axis=1)                  
-    wl_norm = wl_raw / np.nanmedian(wl_raw)                    
-
-    if wl_norm.shape[0] >= 3:
-        wl_resid = 0.5 * (wl_norm[:-2] + wl_norm[2:]) - wl_norm[1:-1]
-        wl_flux_err = np.nanmedian(np.abs(wl_resid))
-    else:
-        wl_flux_err = np.nan
-
-    wl_flux = wl_norm  
+    # Create white light curve
+    #if instrument == 'MIRI/LRS':
+    #    wl_flux = jnp.nanmedian(flux_unbinned, axis=1)
+    #else:
+    #    wl_flux = jnp.nanmean(flux_unbinned, axis=1)   ##TODO: Is there a difference between mean and median for others?
+    #wl_flux = jnp.nanmedian(flux_unbinned, axis=1)
+    #wl_flux_err = 1.4826 * jnp.nanmedian(jnp.abs(wl_flux - jnp.nanmedian(wl_flux)))
+    wlc = np.nansum(flux_unbinned, axis=1)
+    wl_flux = wlc/np.nanmedian(wlc[oot_mask], axis=0)
+    wl_flux_err = np.nanmedian(np.abs(0.5*(wl_flux[0:-2] + wl_flux[2:]) - wl_flux[1:-1]))
 
     return SpectroData(
         time=jnp.array(time),
