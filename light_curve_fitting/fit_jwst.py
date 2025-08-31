@@ -80,7 +80,7 @@ def create_whitelight_model(detrend_type='linear'):
         t0 = numpyro.sample("t0", dist.Normal(prior_params['t0'], 1e-2))
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
-        u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
+        u = numpyro.sample("u", distx.QuadLDParams()) #numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
         depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
 
