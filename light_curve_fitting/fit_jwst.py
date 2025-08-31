@@ -57,17 +57,17 @@ def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
     lc_transit = _compute_transit_model(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t))
-    return (1.0 + lc_transit) * (1.0 + trend)
+    return lc_transit + trend
 
 def compute_lc_explinear(params, t):
     """Computes transit + exponential-linear trend."""
     lc_transit = _compute_transit_model(params, t)
     trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-(t-jnp.min(t)) / params['tau'])
-    return (1.0 + lc_transit) * (1.0 + trend)
+    return lc_transit + trend
 
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
-    return (_compute_transit_model(params, t) + 1.0) * (1.0 + params["c"])
+    return _compute_transit_model(params, t) + params["c"]
 
 def create_whitelight_model(detrend_type='linear'):
     """
@@ -77,7 +77,7 @@ def create_whitelight_model(detrend_type='linear'):
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
         logD = numpyro.sample("logD", dist.Normal(jnp.log(prior_params['duration']), 1e-2))
         duration = numpyro.deterministic("duration", jnp.exp(logD))
-        t0 = numpyro.sample("t0", dist.Normal(prior_params['t0'], 1e-1))
+        t0 = numpyro.sample("t0", dist.Normal(prior_params['t0'], 1e-2))
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
         u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
@@ -91,13 +91,13 @@ def create_whitelight_model(detrend_type='linear'):
 
         # The returned model will only contain ONE of these blocks.
         if detrend_type == 'linear':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_linear(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
         elif detrend_type == 'explinear':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
             params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1))
@@ -105,7 +105,7 @@ def create_whitelight_model(detrend_type='linear'):
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
 
         elif detrend_type == 'gp':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1))
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = 0.0 
 
             logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
@@ -146,9 +146,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
-        logD = numpyro.sample("logD", dist.Normal(jnp.log(mu_duration), 0.001))
+        logD = numpyro.sample("logD", dist.Normal(jnp.log(mu_duration), 1e-2))
         duration = numpyro.deterministic("duration", jnp.exp(logD))
-        t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-1))
+        t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-2))
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
         depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
@@ -170,7 +170,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
 
         if trend_mode == 'free':
-            params['c'] = numpyro.sample('c', dist.Normal(0.0, 0.1).expand([num_lcs]))
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1).expand([num_lcs]))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
             in_axes.update({'c': 0, 'v': 0})
             if detrend_type == 'explinear':
@@ -516,7 +516,7 @@ def main():
                     "rors": jnp.sqrt(PRIOR_DEPTH), 'period': PERIOD_FIXED, '_b': PRIOR_B,
                     'u': U_mu_wl,
                  'logD': jnp.log(PRIOR_DUR), 'b': PRIOR_B, 'depths': PRIOR_DEPTH,
-                 'c': 0.0, 'v': 0.0,
+                 'c': 1.0, 'v': 0.0,
                 }
     
             if detrending_type == 'explinear':
