@@ -56,7 +56,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     
     # Low resolution binning
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
-        wavelengths, flux_transposed, flux_err_transposed, low_res_bins, method='sum'
+        wavelengths, flux_transposed, flux_err_transposed, low_res_bins, method='average'
     )
  
     
@@ -65,7 +65,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
     else:
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
-            wavelengths, flux_transposed, flux_err_transposed, high_res_bins, method='sum'
+            wavelengths, flux_transposed, flux_err_transposed, high_res_bins, method='average'
         )
     
     # Normalize both
