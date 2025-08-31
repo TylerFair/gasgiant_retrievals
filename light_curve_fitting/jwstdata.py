@@ -50,9 +50,12 @@ def normalize_flux(flux, flux_err, norm_range):
 
 def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_unbinned, low_res_bins, high_res_bins, oot_mask):
     """Handle all the binning logic in one place."""
+    flux_unbinned_copy = flux_unbinned * 1.0
+    flux_err_unbinned_copy = flux_err_unbinned * 1.0
+    
     # Transpose flux for binning: (n_time, n_wavelength) -> (n_wavelength, n_time)
-    flux_transposed = jnp.array(flux_unbinned.T)
-    flux_err_transposed = jnp.array(flux_err_unbinned.T)
+    flux_transposed = jnp.array(flux_unbinned_copy.T)
+    flux_err_transposed = jnp.array(flux_err_unbinned_copy.T)
     
     # Low resolution binning
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
