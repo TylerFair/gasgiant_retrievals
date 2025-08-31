@@ -95,25 +95,23 @@ def unpack_niriss_exoted(infile, order):
     wave = fits.getdata(infile, 1 + 4 * (order - 1))
     wave_err = fits.getdata(infile, 2 + 4 * (order - 1))
     fluxcube = fits.getdata(infile, 3 + 4 * (order - 1))
+    fluxcube_err = fits.getdata(infile, 4 + 4 * (order -1))
     wave = wave[5:-5]
     wave_err = wave_err[5:-5]
     fluxcube = fluxcube[:, 5:-5]
-    base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
-    
-    #median_flux = np.nanmedian(fluxcube[base], axis=0)
-    #fluxcube = fluxcube / median_flux
-
+    fluxcube_err = fluxcube_err[:, 5:-5]
     
     if order == 2:
         ii = np.where((wave >= 0.6) & (wave <= 0.85))[0]
-        fluxcube = fluxcube[:, ii]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
 
     wavelength = wave
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
-    
-    return wavelength, t, fluxcube
+    fluxcube_err = np.array(fluxcube_err)
+
+    return wavelength, t, fluxcube, fluxcube_err
 
 def unpack_nirspec_exoted(infile):    
 
@@ -121,22 +119,21 @@ def unpack_nirspec_exoted(infile):
     wave = fits.getdata(infile, 1)
     wave_err = fits.getdata(infile, 2)
     fluxcube = fits.getdata(infile, 3)
-
-
+    fluxcube_err = fits.getdata(infile, 4)
+    wave = wave[5:-5]
+    wave_err = wave_err[5:-5]
+    fluxcube = fluxcube[:, 5:-5]
+    fluxcube_err = fluxcube_err[:, 5:-5]
     
     ii = np.where(wave >= 2.87)[0]
-    fluxcube = fluxcube[:, ii]
+    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
     wave, wave_err = wave[ii], wave_err[ii]
     
-    #base = np.concatenate([np.arange(100), np.arange(100)-100]).astype(int) 
-    #median_flux = np.nanmedian(fluxcube[base], axis=0)
-    #fluxcube = fluxcube / median_flux
-
     wavelength = wave
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
-        
-    return wavelength, t, fluxcube
+    fluxcube_err = np.array(fluxcube_err)
+    return wavelength, t, fluxcube, fluxcube_err
 
 def unpack_miri_exoted(infile):
 
@@ -144,18 +141,21 @@ def unpack_miri_exoted(infile):
     wave = fits.getdata(infile, 1)
     wave_err = fits.getdata(infile, 2)
     fluxcube = fits.getdata(infile, 3)
+    fluxcube_err = fits.getdata(infile, 4)
+    wave = wave[5:-5]
+    wave_err = wave_err[5:-5]
+    fluxcube = fluxcube[:, 5:-5]
+    fluxcube_err = fluxcube_err[:, 5:-5]
+
     ii = np.where((wave > 5) & (wave <= 12))[0]
-    fluxcube = fluxcube[:, ii]
+    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
     wave, wave_err = wave[ii], wave_err[ii]
     ii = np.argsort(wave)
     wave, wave_err = wave[ii], wave_err[ii]
-    fluxcube = fluxcube[:,ii]
+    fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
     
-    ### This part was normalizing each flux by median flux
-    #median_flux = np.nanmedian(fluxcube[base], axis=0)
-    #fluxcube = fluxcube / median_flux
-
     wavelength = wave
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
-    return wavelength, t, fluxcube
+    fluxcube_err = np.array(fluxcube_err)
+    return wavelength, t, fluxcube, fluxcube_err
