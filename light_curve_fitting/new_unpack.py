@@ -107,11 +107,12 @@ def unpack_niriss_exoted(infile, order):
         wave, wave_err = wave[ii], wave_err[ii]
 
     wavelength = wave
+    wavelength_err = wave_err
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     fluxcube_err = np.array(fluxcube_err)
 
-    return wavelength, t, fluxcube, fluxcube_err
+    return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
 def unpack_nirspec_exoted(infile):    
 
@@ -130,10 +131,11 @@ def unpack_nirspec_exoted(infile):
     wave, wave_err = wave[ii], wave_err[ii]
     
     wavelength = wave
+    wavelength_err = wave_err
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     fluxcube_err = np.array(fluxcube_err)
-    return wavelength, t, fluxcube, fluxcube_err
+    return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
 
 def unpack_miri_exoted(infile):
 
@@ -155,7 +157,8 @@ def unpack_miri_exoted(infile):
     fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
     
     wavelength = wave
+    wavelength_err = wave_err
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     fluxcube_err = np.array(fluxcube_err)
-    return wavelength, t, fluxcube, fluxcube_err
+    return wavelength, wavelength_err, t, fluxcube, fluxcube_err
