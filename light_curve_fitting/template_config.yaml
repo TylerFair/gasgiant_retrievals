@@ -38,6 +38,10 @@ flags:
   need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
   mask_start: False # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
   mask_end: False  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
+  #spot_amp: 0.0 
+  #spot_center: 0.0
+  #spot_width: 0.0
+
   
 outlier_clip:
   whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
