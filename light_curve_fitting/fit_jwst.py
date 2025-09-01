@@ -22,6 +22,7 @@ import yaml
 import arviz as az 
 from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
+from matplotlib.widgets import Slider, Button, TextBox
 #pd.set_option('display.max_columns', None)
 #pd.set_option('display.max_rows', None)
 import tinygp 
@@ -545,6 +546,7 @@ def main():
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
             plt.scatter(data.wl_time, data.wl_flux)
             plt.savefig(f'{output_dir}/00_{instrument_full_str}_whitelight_precheck.png')
+            plt.close()
             #keep_going = input('Whitelight precheck with guess T0 has been created, would you like to continue? (Enter to continue/N to exit)')
             #plt.close()
             #if keep_going.lower == 'n':
@@ -581,9 +583,87 @@ def main():
              
     
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
-            #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
+            if detrending_type == 'spot':
+                whitelight_model_for_run = create_whitelight_model(detrend_type='linear')
             soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
+            if detrending_type == 'spot':
+                amp0     = float(prior_params_wl['spot_amp'])
+                center0  = float(prior_params_wl['spot_mu'])
+                width0   = float(prior_params_wl['spot_sigma'])
+                tmin, tmax = float(np.min(data.time)), float(np.max(data.time))
+                AMP_MIN, AMP_MAX         = (0.0, 0.01)
+                CENTER_MIN, CENTER_MAX   = (tmin, tmax) 
+                WIDTH_MIN, WIDTH_MAX     = (0.0, 0.01)
+                fig, ax = plt.subplots(figsize=(8, 4))
+                plt.subplots_adjust(left=0.10, right=0.98, bottom=0.35)  
+                soln['spot_amp'] = prior_params_wl['spot_amp']
+                soln['spot_mu'] = prior_params_wl['spot_mu']
+                soln['spot_sigma'] = prior_params_wl['spot_sigma']
+                soln['period'] = prior_params_wl['period']
+                lc_model = compute_lc_spot(soln, data.time)
+                ax.scatter(data.time, data.wl_flux, c='k', s=4, alpha=0.6, label='data')
+                [model_line] = ax.plot(data.time, lc_model, c='r', lw=1.5, label='model')
+                ax.set_xlabel("time")
+                ax.set_ylabel("flux")
+                axcolor = 'lightgoldenrodyellow'
+                ax_amp    = plt.axes([0.10, 0.25, 0.80, 0.03], facecolor=axcolor)
+                ax_center = plt.axes([0.10, 0.20, 0.80, 0.03], facecolor=axcolor)
+                ax_width  = plt.axes([0.10, 0.15, 0.80, 0.03], facecolor=axcolor)
+                s_amp    = Slider(ax_amp,    'spot_amp',    AMP_MIN,    AMP_MAX,    valinit=amp0)
+                s_center = Slider(ax_center, 'spot_mu', CENTER_MIN, CENTER_MAX, valinit=center0)
+                s_width  = Slider(ax_width,  'spot_sigma',  WIDTH_MIN,  WIDTH_MAX,  valinit=width0)
+                reset_ax = plt.axes([0.10, 0.03, 0.14, 0.06])
+                save_ax  = plt.axes([0.28, 0.03, 0.20, 0.06])
+                cancel_ax= plt.axes([0.51, 0.03, 0.14, 0.06])
+                reset_btn = Button(reset_ax, 'Reset')
+                save_btn  = Button(save_ax,  'Save / Use These')
+                cancel_btn= Button(cancel_ax,'Cancel')
+                bestfit = {
+                    'amp': amp0,
+                    'mu': center0,
+                    'sigma': width0,
+                    'accepted': False
+                }
+                def recompute_and_draw(a, c, w):
+                    p = dict(soln)
+                    p['spot_amp']    = float(a)
+                    p['spot_mu'] = float(c)
+                    p['spot_sigma']  = float(w)
+                    model_line.set_ydata(compute_lc_spot(p, data.time))
+                    fig.canvas.draw_idle()
+                def on_slider_change(_):
+                    recompute_and_draw(s_amp.val, s_center.val, s_width.val)
+                def on_reset(_):
+                    s_amp.reset(); s_center.reset(); s_width.reset()
+                def on_save(_):
+                    bestfit['amp']   = float(s_amp.val)
+                    bestfit['mu']    = float(s_center.val)
+                    bestfit['sigma'] = float(s_width.val)
+                    bestfit['accepted'] = True
+                    plt.close(fig)
+                def on_cancel(_):
+                    bestfit['accepted'] = False
+                    plt.close(fig)
+                s_amp.on_changed(on_slider_change)
+                s_center.on_changed(on_slider_change)
+                s_width.on_changed(on_slider_change)
+                reset_btn.on_clicked(on_reset)
+                save_btn.on_clicked(on_save)
+                cancel_btn.on_clicked(on_cancel)
             
+                plt.show() 
+                if bestfit['accepted']:
+                    prior_params_wl['spot_amp']   = bestfit['amp']
+                    prior_params_wl['spot_mu']    = bestfit['mu']
+                    prior_params_wl['spot_sigma'] = bestfit['sigma']
+            
+                print(f"Using spot params: amp={prior_params_wl['spot_amp']}, mu={prior_params_wl['spot_mu']}, sigma={prior_params_wl['spot_sigma']}")
+
+                whitelight_model_for_run = create_whitelight_model(detrend_type='spot')   
+                soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
+
+                
+
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(
                     whitelight_model_for_run,
@@ -696,7 +776,7 @@ def main():
                                                                 + bestfit_params_wl['A'] * jnp.exp(-(data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask]))/bestfit_params_wl['tau'])) )
             if detrending_type == 'spot': 
                 detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
-                                                                    + spot_crossing(t, bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"]))  
+                                                                    + spot_crossing(data.wl_time[~wl_mad_mask], bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"]))  
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
