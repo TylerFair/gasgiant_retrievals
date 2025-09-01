@@ -688,11 +688,11 @@ def main():
             plt.close()
     
             if detrending_type == 'linear':
-                compute_lc_linear(bestfit_params_wl, data.wl_time[~wl_mad_mask)
+                compute_lc_linear(bestfit_params_wl, data.wl_time[~wl_mad_mask])
             if detrending_type == 'explinear': 
-                compute_lc_explinear(bestfit_params_wl, data.wl_time[~wl_mad_mask)
+                compute_lc_explinear(bestfit_params_wl, data.wl_time[~wl_mad_mask])
             if detrending_type == 'spot': 
-                compute_lc_spot(bestfit_params_wl, data.wl_time[~wl_mad_mask)
+                compute_lc_spot(bestfit_params_wl, data.wl_time[~wl_mad_mask])
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
