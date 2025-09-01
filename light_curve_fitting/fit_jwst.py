@@ -58,7 +58,7 @@ def _compute_transit_model(params, t):
     return limb_dark_light_curve(orbit, params["u"])(t)
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
-    return _compute_transit_model(params, t)
+    return _compute_transit_model(params, t) + 1.0
     
 def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
