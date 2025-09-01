@@ -601,9 +601,6 @@ def main():
                 az.to_netcdf(inf_data, 'whitelight_trace.nc')
             wl_samples = mcmc.get_samples()
     
-            if detrending_type == 'gp':
-                print(f"Setting platform back to '{host_device}' for multi-wavelength fit.")
-                numpyro.set_platform(host_device)
             print(az.summary(inf_data, var_names=None, round_to=7))
     
             bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
@@ -767,6 +764,13 @@ def main():
                     exit()
         else:
             print(f'GP trends already exist... If you want to refit GP on whitelight please remove {output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+            wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
+            bestfit_params_wl = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            DURATION_BASE = jnp.array(bestfit_params_wl['duration'][0])
+            T0_BASE = jnp.array(bestfit_params_wl['t0'][0])
+            B_BASE = jnp.array(bestfit_params_wl['b'][0])
+            RORS_BASE = jnp.array(bestfit_params_wl['rors'][0])
+            DEPTH_BASE = RORS_BASE**2
     else:
         print(f'Whitelight outliers and bestfit parameters already exist, skipping whitelight fit. If you want to fit whitelight please delete {output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
         wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
