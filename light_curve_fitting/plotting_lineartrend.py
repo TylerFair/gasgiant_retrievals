@@ -38,7 +38,12 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)            
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+        elif detrend_type == 'spot':
+            spot_amp = map_params['spot_amp'][i]
+            spot_mu = map_params['spot_mu'][i]
+            spot_sigma = map_params['spot_sigma'][o]
+            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
@@ -87,7 +92,12 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)            
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+        elif detrend_type == 'spot':
+            spot_amp = map_params['spot_amp'][i]
+            spot_mu = map_params['spot_mu'][i]
+            spot_sigma = map_params['spot_sigma'][o]
+            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
