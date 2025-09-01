@@ -86,7 +86,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
 def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None):
     """Main function to process spectroscopy data."""
     # Unpack data based on instrument
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM':
         nrs = cfg['nrs']
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
