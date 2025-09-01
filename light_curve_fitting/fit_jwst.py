@@ -164,7 +164,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                                mu_depths=None, PERIOD=None, trend_fixed=None,
                                ld_interpolated=None, ld_fixed=None,
                                mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None,
-                               mu_u_ld=None):):
+                               mu_u_ld=None):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
