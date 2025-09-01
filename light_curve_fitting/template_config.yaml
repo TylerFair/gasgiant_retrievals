@@ -1,7 +1,7 @@
 # config.yaml
 
 planet:
-  name: HATP11b       # needs to match directory where Stage 3 files are stored, i.e. 'TOI1130b_NIRSPEC'
+  name: HATP11b       # Planet name. 
   period:     4.887802443     # fixed 
   duration:   0.09815       # prior
   t0:         60895.9922    # prior, needs to be estimated from whitelight glance
@@ -16,38 +16,39 @@ stellar:
   ld_data_path: "../exotic_ld_data"
 
 instrument: 'NIRISS/SOSS'
-order: 1
-nrs: None              # 1 or 2
-path: 'HATP11'
-input_dir: 'HATP11b_NIRISS' # where the calints files are stored relative to path
-output_dir: 'ORDER1_LINEAR_INTERPLD' # where the output files are stored relative to path
-fits_file: 'xyz.fits'
+order: 1            # NIRISS Order (1 or 2)
+nrs: None           # NIRSPEC NRS (1 or 2, PRISM & G395M = 1)
+path: 'HATP11'      # Base path to input and output dirs
+input_dir: 'HATP11b_NIRISS' # where fits files are stored relative to path. 
+output_dir: 'ORDER1_LINEAR_INTERPLD' # where the output files are to be stored relative to path
+fits_file: 'xyz.fits' # fits file in input_dir. 
 
 resolution:
-  high: 400 # instrument resolution to bin spectroscopic curves, can be an integer or 'native' for native resolution. 
-  low:  40 #  instrument resolution to bin spectroscopic curves [optional: not triggered if not low-res flag]
+  high: 400 # instrument resolution to bin to; 'native' for native resolution. 
+  low:  40 #  instrument resolution to bin to [optional: not triggered if low-res flag is False]
 
 flags:
   detrending_type: 'linear'  # Type of detrending: 
                                 # linear = offset + linear with time term,
                                 # gp = whitelight gp on CPU which is subtracted from multiwavelength, and then linear on GPU, 
                                 # explinear = linear with Aexp(-t/tau) ramp. 
+                                # spot = experimental spot crossing + linear trend. 
   interpolate_trend: False # Option to interpolate trend coefficients from low res to high res | defaults to False
   interpolate_ld: True # Option to interpolate LD coefficients from low res ot high res | defaults to false
   fix_ld: False
   need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
   mask_start: False # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
   mask_end: False  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
-  #spot_amp: 0.0 
-  #spot_center: 0.0
-  #spot_width: 0.0
+  #spot_amp: 0.0 # ampltiude of spot crossing in relative flux (check initial guess plot)
+  #spot_center: 0.0 # center of spot crossing (in time units i.e. 60123.45 ) 
+  #spot_width: 0.0 # width of spot crossing (in days i.e. 0.01 ~ 15 minutes)
 
   
 outlier_clip:
   whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
   spectroscopic_sigma: 4 # sigma to clip outliers from spectroscopic residuals
 
-host_device: "gpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda]<=0.4.31, cpu needs jax[cpu]<=0.4.31
+host_device: "gpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda].
 
 
 
