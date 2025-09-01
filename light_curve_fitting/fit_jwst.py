@@ -431,7 +431,7 @@ def main():
 
 
     instrument = cfg['instrument']
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM:
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM':
         nrs = cfg['nrs']
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
