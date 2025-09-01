@@ -273,6 +273,9 @@ def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None)
     if instrument == 'NIRSPEC/G395M':
         mode = "JWST_NIRSpec_G395M"
         wl_min, wl_max = 28700.0, 51700.0 #29000, 52000  # Angstroms
+    elif instrument == 'NIRSPEC/PRISM':
+        mode = "JWST_NIRSpec_Prism"
+        wl_min, wl_max = 5000.0, 55000.0 
     elif instrument == 'NIRISS/SOSS':
         mode = f"JWST_NIRISS_SOSSo{order}"
         wl_min, wl_max = 8300.0, 28100.0  # Angstroms
@@ -428,7 +431,7 @@ def main():
 
 
     instrument = cfg['instrument']
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM:
         nrs = cfg['nrs']
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
@@ -506,7 +509,7 @@ def main():
         M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
         ld_data_path=ld_data_path
     )
-    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' else ''
+    mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
     spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
 
@@ -537,7 +540,7 @@ def main():
 
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'MIRI/LRS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument)
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order)
@@ -924,7 +927,7 @@ def main():
 
         DEPTHS_BASE_LR = jnp.full(num_lcs_lr, DEPTH_BASE)
 
-        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'MIRI/LRS':
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr , instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order)
@@ -1221,7 +1224,7 @@ def main():
         print("HR Run Config: Using INTERPOLATED limb darkening.")
     
     elif hr_ld_mode == 'fixed':
-        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'MIRI/LRS':
             U_mu_hr = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
@@ -1230,7 +1233,7 @@ def main():
         print("HR Run Config: Using FIXED limb darkening.")
     
     else: # hr_ld_mode == 'free'
-        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'MIRI/LRS':
+        if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'MIRI/LRS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
