@@ -44,6 +44,8 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
             spot_mu = map_params['spot_mu'][i]
             spot_sigma = map_params['spot_sigma'][i]
             trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+        elif detrend_type == 'none':
+            trend = 0.0
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
@@ -98,6 +100,8 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
             spot_mu = map_params['spot_mu'][i]
             spot_sigma = map_params['spot_sigma'][i]
             trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+        elif detrend_type == 'none':
+            trend = 0.0
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
