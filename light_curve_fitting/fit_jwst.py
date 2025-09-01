@@ -570,8 +570,13 @@ def main():
                 prior_params_wl['GP_log_rho'] = jnp.log(0.1)
     
             if detrending_type == 'gp':
-                print("Setting platform to 'cpu' for GP whitelight fit.")
-                numpyro.set_platform('cpu')
+                print("Please make sure config is CPU for GP whitelight fit!")
+                print("GP's are currently exceptionally slow if using GPU,")
+                print("so it is recommended to fit the whitelight curve")
+                print("and then rerun with config swapped to GPU.")
+                print("This script will prompt you once the whitelight")
+                print("is finished to exit the script (your GP will be saved). Happy fitting!")
+             
     
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
             #soln = optimx.optimize(whitelight_model, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl, detrend_type=detrending_type)
@@ -756,6 +761,10 @@ def main():
                 SPOT_AMP_BASE = jnp.array(bestfit_params_wl['spot_amp'][0])
                 SPOT_MU_BASE = jnp.array(bestfit_params_wl['spot_mu'][0])
                 SPOT_SIGMA_BASE = jnp.array(bestfit_params_wl['spot_sigma'][0])
+            if detrending_type == 'gp':
+                exit_link = input('The whitelight fitting has finished, as you are using a GP you should exit now and swap to GPU if available. Would you like to leave (Y/N)')
+                if exit_link.lower == 'y':
+                    exit()
         else:
             print(f'GP trends already exist... If you want to refit GP on whitelight please remove {output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
     else:
