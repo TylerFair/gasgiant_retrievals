@@ -494,7 +494,6 @@ def main():
     PRIOR_B = planet_cfg['b']
     PRIOR_RPRS = planet_cfg['rprs']
     PRIOR_DEPTH = PRIOR_RPRS ** 2
-
     # stellar parameters
     stellar_feh = stellar_cfg['feh']
     stellar_teff = stellar_cfg['teff']
@@ -526,6 +525,8 @@ def main():
     print(f"Low res: {data.wavelengths_lr.shape}, {data.flux_lr.shape}")
     print(f"High res: {data.wavelengths_hr.shape}, {data.flux_hr.shape}, {data.flux_err_hr.shape}")
 
+    if (PRIOR_T0 <= jnp.min(data.time)) or (PRIOR_T0 >= jnp.max(data.time)):
+        print('T0 is not in data timeframe, please double check your T0 with the 00_precheck plot!!!')
 
     COMPUTE_KERNELS = {
     'linear': compute_lc_linear,
