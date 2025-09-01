@@ -23,8 +23,9 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
         # Extract MAP parameters for this wavelength
         rors_i = map_params['rors'][i]
         u_i = map_params['u'][i]
-        c_i = map_params['c'][i]
-        v_i = map_params['v'][i]
+        if detrend_type != 'none':
+            c_i = map_params['c'][i]
+            v_i = map_params['v'][i]
         orbit = TransitOrbit(
             period=transit_params["period"],
             duration=map_params["duration"],
@@ -78,8 +79,9 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         ax = plt.subplot(gs[i // ncols, i % ncols])
         rors_i = map_params['rors'][i]
         u_i = map_params['u'][i]
-        c_i = map_params['c'][i]
-        v_i = map_params['v'][i]
+        if detrend_type != 'none':
+            c_i = map_params['c'][i]
+            v_i = map_params['v'][i]
         
         orbit = TransitOrbit(
             period=transit_params["period"],
