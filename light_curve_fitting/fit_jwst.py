@@ -862,7 +862,7 @@ def main():
                 SPOT_SIGMA_BASE = jnp.array(bestfit_params_wl['spot_sigma'][0])
             if detrending_type == 'gp':
                 exit_link = input('The whitelight fitting has finished, as you are using a GP you should exit now and swap to GPU if available. Would you like to leave (Y/N)')
-                if exit_link.lower == 'y':
+                if exit_link.lower() == 'y':
                     exit()
         else:
             print(f'GP trends already exist... If you want to refit GP on whitelight please remove {output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
