@@ -1014,8 +1014,9 @@ def main():
         )      
         
         ld_u_lr = np.array(samples_lr["u"])
-        trend_c_lr = np.array(samples_lr["c"])
-        trend_v_lr = np.array(samples_lr["v"])
+        if detrend_type_multiwave != 'none':
+            trend_c_lr = np.array(samples_lr["c"])
+            trend_v_lr = np.array(samples_lr["v"])
         if detrend_type_multiwave == 'explinear':
             trend_A_lr = np.array(samples_lr["A"])
             trend_tau_lr = np.array(samples_lr["tau"])
