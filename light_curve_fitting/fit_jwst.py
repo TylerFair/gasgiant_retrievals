@@ -56,7 +56,10 @@ def _compute_transit_model(params, t):
         radius_ratio=params["rors"],
     )
     return limb_dark_light_curve(orbit, params["u"])(t)
-
+def compute_lc_none(params, t):
+    """Computes transit with no detrending."""
+    return _compute_transit_model(params, t)
+    
 def compute_lc_linear(params, t):
     """Computes transit + linear trend."""
     lc_transit = _compute_transit_model(params, t)
@@ -122,7 +125,10 @@ def create_whitelight_model(detrend_type='linear'):
             params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01)) # 15 min half-width
             lc_model = compute_lc_spot(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
-            
+        elif detrend_type == 'none':
+            lc_model = compute_lc_none(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+                
         elif detrend_type == 'gp':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = 0.0 
@@ -158,6 +164,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         compute_lc_kernel = compute_lc_spot
     elif detrend_type == 'gp':
         compute_lc_kernel = compute_lc_gp_mean
+    elif detrend_type == 'none':
+        compute_lc_kernel = compute_lc_none
     else:
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
@@ -191,36 +199,36 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         }
 
         in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
-
-        if trend_mode == 'free':
-            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1).expand([num_lcs]))
-            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
-            in_axes.update({'c': 0, 'v': 0})
-            if detrend_type == 'explinear':
-                params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                in_axes.update({'A': 0, 'tau': 0})
-            if detrend_type == 'spot':
-                params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
-                params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(mu_spot_mu, 0.01).expand([num_lcs]))
-                params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(mu_spot_sigma, 0.01).expand([num_lcs]))
-                in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
-        elif trend_mode == 'fixed':
-            trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
-            params['c'] = numpyro.deterministic('c', trend_temp[:, 0])
-            params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
-            in_axes.update({'c': 0, 'v': 0})
-            if detrend_type == 'explinear':
-                params['A'] = numpyro.deterministic('A', trend_temp[:, 2])
-                params['tau'] = numpyro.deterministic('tau', trend_temp[:, 3])
-                in_axes.update({'A': 0, 'tau': 0})
-            if detrend_type == 'spot':
-                params['spot_amp'] = numpyro.deterministic('spot_amp', trend_temp[:, 2])
-                params['spot_mu'] = numpyro.deterministic('spot_mu', trend_temp[:, 3])
-                params['spot_sigma'] = numpyro.deterministic('spot_sigma', trend_temp[:, 4])
-                in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
-        else:
-            raise ValueError(f"Unknown trend_mode: {trend_mode}")
+        if detrend_type != 'none':
+            if trend_mode == 'free':
+                params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1).expand([num_lcs]))
+                params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                in_axes.update({'c': 0, 'v': 0})
+                if detrend_type == 'explinear':
+                    params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    in_axes.update({'A': 0, 'tau': 0})
+                if detrend_type == 'spot':
+                    params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
+                    params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(mu_spot_mu, 0.01).expand([num_lcs]))
+                    params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(mu_spot_sigma, 0.01).expand([num_lcs]))
+                    in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
+            elif trend_mode == 'fixed':
+                trend_temp = numpyro.deterministic('trend_temp', trend_fixed)
+                params['c'] = numpyro.deterministic('c', trend_temp[:, 0])
+                params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
+                in_axes.update({'c': 0, 'v': 0})
+                if detrend_type == 'explinear':
+                    params['A'] = numpyro.deterministic('A', trend_temp[:, 2])
+                    params['tau'] = numpyro.deterministic('tau', trend_temp[:, 3])
+                    in_axes.update({'A': 0, 'tau': 0})
+                if detrend_type == 'spot':
+                    params['spot_amp'] = numpyro.deterministic('spot_amp', trend_temp[:, 2])
+                    params['spot_mu'] = numpyro.deterministic('spot_mu', trend_temp[:, 3])
+                    params['spot_sigma'] = numpyro.deterministic('spot_sigma', trend_temp[:, 4])
+                    in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
+            else:
+                raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
         numpyro.sample('obs', dist.Normal(y_model, yerr), obs=y)
@@ -536,7 +544,9 @@ def main():
     'linear': compute_lc_linear,
     'explinear': compute_lc_explinear,
     'spot': compute_lc_spot,
-     'gp': compute_lc_gp_mean }
+     'gp': compute_lc_gp_mean,
+    'none': compute_lc_none}
+
 
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
@@ -691,9 +701,10 @@ def main():
             bestfit_params_wl = {'duration': jnp.nanmedian(wl_samples['duration']), 't0': jnp.nanmedian(wl_samples['t0']),
                                 'b': jnp.nanmedian(wl_samples['b']), 'rors': jnp.nanmedian(wl_samples['rors']),
                                 'period': PERIOD_FIXED, 'u': jnp.nanmedian(wl_samples['u'], axis=0),
-                                'c': jnp.nanmedian(wl_samples['c']),
-                                 'v': jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0,
                                 }
+            if detrending_type != 'none':
+                bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
+                bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
             if detrending_type == 'explinear':
                 bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
                 bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
@@ -714,6 +725,8 @@ def main():
                 wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
             if detrending_type == 'spot':
                 wl_transit_model = compute_lc_spot(bestfit_params_wl, data.wl_time)
+            if detrending_type == 'none':
+                wl_transit_model = compute_lc_none(bestfit_params_wl, data.wl_time)
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -780,6 +793,8 @@ def main():
             if detrending_type == 'spot': 
                 detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) 
                                                                     + spot_crossing(data.wl_time[~wl_mad_mask], bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"]))  
+            if detrending_type == 'none':
+                detrended_flux = data.wl_flux[~wl_mad_mask]
             if detrending_type == 'gp':
                 wl_kernel = tinygp.kernels.quasisep.Matern32(
                     scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
@@ -943,8 +958,10 @@ def main():
         init_params_lr = {
             "logD": jnp.log(bestfit_params_wl['duration'][0]), "t0": bestfit_params_wl['t0'][0], "_b": bestfit_params_wl['b'][0],
             "u": U_mu_lr, "depths": jnp.full(num_lcs_lr, bestfit_params_wl['rors'][0]**2),
-            'c': jnp.full(num_lcs_lr, bestfit_params_wl['c'][0]), 'v': jnp.full(num_lcs_lr, bestfit_params_wl['v'][0]),
             }
+        if detrend_type_multiwave != 'none':
+            init_params_lr['c'] = jnp.full(num_lcs_lr, bestfit_params_wl['c'][0])
+            init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl['v'][0])
         if detrend_type_multiwave == 'explinear':
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl['A'][0])
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl['tau'][0])
@@ -1013,9 +1030,10 @@ def main():
             "b": jnp.nanmedian(samples_lr["b"]),
             "rors": jnp.nanmedian(samples_lr["rors"], axis=0),
             "u": jnp.nanmedian(ld_u_lr, axis=0),  "period": PERIOD_FIXED,
-            'c': jnp.nanmedian(samples_lr["c"], axis=0),
-            'v': jnp.nanmedian(samples_lr["v"], axis=0),
         }
+        if detrend_type_multiwave != 'none':
+            map_params_lr['c'] = jnp.nanmedian(samples_lr["c"], axis=0)
+            map_params_lr['v'] = jnp.nanmedian(samples_lr["v"], axis=0)
         if detrend_type_multiwave == 'explinear':
             map_params_lr['A'] = jnp.nanmedian(samples_lr['A'], axis=0)
             map_params_lr['tau'] = jnp.nanmedian(samples_lr['tau'], axis=0)
@@ -1033,9 +1051,10 @@ def main():
         in_axes_map = {
             'rors': 0, 
             'u': 0, 
-            'c': 0, 
-            'v': 0
         }
+        if detrend_type_multiwave != 'none':
+            in_axes_map['c'] = 0
+            in_axes_map['v'] = 0
         if detrend_type_multiwave == 'explinear':
             in_axes_map.update({'A': 0, 'tau': 0})
         if detrend_type_multiwave == 'spot':
@@ -1107,10 +1126,18 @@ def main():
         poly_orders = [1, 2, 3, 4]
         wl_lr = np.array(data.wavelengths_lr)
 
-        print("Fitting polynomials to trend coefficients...")
-        best_poly_coeffs_c, best_order_c, _ = fit_polynomial(wl_lr, trend_c_lr, poly_orders)
-        best_poly_coeffs_v, best_order_v, _ = fit_polynomial(wl_lr, trend_v_lr, poly_orders)
-        print(f"Selected polynomial degrees: c={best_order_c}, v={best_order_v}")
+        if detrending_type != 'none':
+            print("Fitting polynomials to trend coefficients...")
+            best_poly_coeffs_c, best_order_c, _ = fit_polynomial(wl_lr, trend_c_lr, poly_orders)
+            best_poly_coeffs_v, best_order_v, _ = fit_polynomial(wl_lr, trend_v_lr, poly_orders)
+            print(f"Selected polynomial degrees: c={best_order_c}, v={best_order_v}")
+
+            plot_poly_fit(wl_lr, trend_c_lr, best_poly_coeffs_c, best_order_c,
+                            "Wavelength (μm)", "Trend coefficient c", "Trend Offset (c) Polynomial Fit",
+                            f"{output_dir}/2optional1_{instrument_full_str}_R{low_resolution_bins}_cinterp.png")
+            plot_poly_fit(wl_lr, trend_v_lr, best_poly_coeffs_v, best_order_v,
+                            "Wavelength (μm)", "Trend coefficient v", "Trend Slope (v) Polynomial Fit",
+                            f"{output_dir}/2optional2_{instrument_full_str}_R{low_resolution_bins}_vinterp.png")
         if detrend_type_multiwave == 'explinear':
             best_poly_coeffs_A, best_order_A, _ = fit_polynomial(wl_lr, trend_A_lr, poly_orders)
             best_poly_coeffs_tau, best_order_tau, _ = fit_polynomial(wl_lr, trend_tau_lr, poly_orders)
@@ -1120,14 +1147,7 @@ def main():
             best_poly_coeffs_spot_mu, best_order_spot_mu, _ = fit_polynomial(wl_lr, trend_spot_mu_lr, poly_orders)
             best_poly_coeffs_spot_sigma, best_order_spot_sigma, _ = fit_polynomial(wl_lr, trend_spot_sigma_lr, poly_orders)
             print(f"Selected polynomial degrees: spot amp={best_order_spot_amp}, spot mu={best_order_spot_mu}, spot sigma={best_order_spot_sigma}")
-            
 
-        plot_poly_fit(wl_lr, trend_c_lr, best_poly_coeffs_c, best_order_c,
-                        "Wavelength (μm)", "Trend coefficient c", "Trend Offset (c) Polynomial Fit",
-                        f"{output_dir}/2optional1_{instrument_full_str}_R{low_resolution_bins}_cinterp.png")
-        plot_poly_fit(wl_lr, trend_v_lr, best_poly_coeffs_v, best_order_v,
-                        "Wavelength (μm)", "Trend coefficient v", "Trend Slope (v) Polynomial Fit",
-                        f"{output_dir}/2optional2_{instrument_full_str}_R{low_resolution_bins}_vinterp.png")
 
         if interpolate_ld:
             print("Fitting polynomials to limb darkening coefficients...")
@@ -1273,8 +1293,9 @@ def main():
         "u": U_mu_hr_init,
     }
     if hr_trend_mode == 'free':
-        init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
-        init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
+        if detrend_type_multiwave != 'none':
+            init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
+            init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
         if detrend_type_multiwave == 'explinear':
             init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
             init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
