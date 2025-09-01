@@ -71,10 +71,24 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wavelengths, flux_transposed, flux_err_transposed, high_res_bins, method='average'
         )
     
-    # Normalize both
     flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr, norm_range=oot_mask)
     flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr, norm_range=oot_mask)
+    
+    if flux_err_lr.ndim == 2:
+        nanmask_lr = np.any(np.isnan(flux_err_lr), axis=1)
+    else:
+        nanmask_lr = np.isnan(flux_err_lr)
+    if flux_err_hr.ndim == 2:
+        nanmask_hr = np.any(np.isnan(flux_err_hr), axis=1)
+    else:
+        nanmask_hr = np.isnan(flux_err_hr)
 
+    wl_lr, wl_err_lr = wl_lr[~nanmask_lr], wl_err_lr[~nanmask_lr]
+    flux_lr, flux_err_lr = flux_lr[~nanmask_lr], flux_err_lr[~nanmask_lr]
+
+    wl_hr, wl_err_hr = wl_hr[~nanmask_hr], wl_err_hr[~nanmask_hr]
+    flux_hr, flux_err_hr = flux_hr[~nanmask_hr], flux_err_hr[~nanmask_hr]
+    
     return {
         'wavelengths_lr': wl_lr, 'wavelengths_err_lr': wl_err_lr, 
         'flux_lr': flux_lr, 'flux_err_lr': flux_err_lr,
