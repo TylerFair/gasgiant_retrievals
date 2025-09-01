@@ -163,7 +163,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None,
                                mu_depths=None, PERIOD=None, trend_fixed=None,
                                ld_interpolated=None, ld_fixed=None,
-                               mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None):
+                               mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None,
+                               mu_u_ld=None):):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
@@ -176,7 +177,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
 
         if ld_mode == 'free':
-            u = numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([num_lcs, 2]))
+            u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
         elif ld_mode == 'fixed':
             u = numpyro.deterministic("u", ld_fixed)
         elif ld_mode == 'interpolated':
@@ -894,6 +895,8 @@ def main():
         }
         if lr_ld_mode == 'fixed':
             model_run_args_lr['ld_fixed'] = U_mu_lr
+        if lr_ld_mode == 'free':
+            model_run_args_lr['mu_u_ld'] = U_mu_lr
         if detrending_type == 'spot':
             model_run_args_lr['mu_spot_amp'] = SPOT_AMP_BASE
             model_run_args_lr['mu_spot_mu'] = SPOT_MU_BASE
@@ -1150,6 +1153,7 @@ def main():
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
+        model_run_args_hr['mu_u_ld'] = U_mu_hr_init
         print("HR Run Config: FITTING for limb darkening (free).")
     
     if hr_trend_mode == 'fixed':
