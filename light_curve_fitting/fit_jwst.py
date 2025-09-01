@@ -70,7 +70,7 @@ def compute_lc_explinear(params, t):
     
 def compute_lc_spot(params, t):
     """Computes transit + spot crossing."""
-    lc_transit = compute_transit_model(params, t)
+    lc_transit = _compute_transit_model(params, t)
     spot = spot_crossing(t, params["spot_amp"], params["spot_mu"], params["spot_sigma"])
     trend = params["c"] + params["v"] * (t - jnp.min(t))
     return lc_transit + trend + spot
