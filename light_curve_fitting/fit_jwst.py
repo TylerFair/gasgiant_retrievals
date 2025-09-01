@@ -200,7 +200,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
                 params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
                 in_axes.update({'A': 0, 'tau': 0})
-            if trend_mode == 'spot':
+            if detrend_type == 'spot':
                 params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
                 params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(mu_spot_mu, 0.01).expand([num_lcs]))
                 params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(mu_spot_sigma, 0.01).expand([num_lcs]))
@@ -978,7 +978,7 @@ def main():
             model_run_args_lr['ld_fixed'] = U_mu_lr
         if lr_ld_mode == 'free':
             model_run_args_lr['mu_u_ld'] = U_mu_lr
-        if detrending_type == 'spot':
+        if detrend_type_multiwave == 'spot':
             model_run_args_lr['mu_spot_amp'] = SPOT_AMP_BASE
             model_run_args_lr['mu_spot_mu'] = SPOT_MU_BASE
             model_run_args_lr['mu_spot_sigma'] = SPOT_SIGMA_BASE
@@ -1260,7 +1260,7 @@ def main():
     model_run_args_hr['mu_t0'] = T0_BASE
     model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
     model_run_args_hr['PERIOD'] = PERIOD_FIXED
-    if detrending_type == 'spot':
+    if detrend_type_multiwave == 'spot':
         model_run_args_hr['mu_spot_amp'] = SPOT_AMP_BASE
         model_run_args_hr['mu_spot_mu'] = SPOT_MU_BASE
         model_run_args_hr['mu_spot_sigma'] = SPOT_SIGMA_BASE
