@@ -56,25 +56,16 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     # Transpose flux for binning: (n_time, n_wavelength) -> (n_wavelength, n_time)
     flux_transposed = jnp.array(flux_unbinned_copy.T)
     flux_err_transposed = jnp.array(flux_err_unbinned_copy.T)
-
-    bad_wl = (~np.isfinite(flux_transposed)).any(axis=1) | (~np.isfinite(flux_err_transposed)).any(axis=1)
-    keep_wl = ~bad_wl
-    wavelengths      = wavelengths[keep_wl]
-    wavelengths_err  = wavelengths_err[keep_wl]
-    flux_transposed  = flux_transposed[keep_wl, :]
-    flux_err_transposed = flux_err_transposed[keep_wl, :]
     
-    bad_t_unbinned = (~np.isfinite(flux_transposed)).any(axis=0) | (~np.isfinite(flux_err_transposed)).any(axis=0)
-    keep_t_unbinned = ~bad_t_unbinned
-    flux_transposed      = flux_transposed[:, keep_t_unbinned]
-    flux_err_transposed  = flux_err_transposed[:, keep_t_unbinned]
-
     # Low resolution binning
     wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
         wavelengths, flux_transposed, flux_err_transposed, low_res_bins, method='average'
     )
  
-    
+    n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
+    wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
+    flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
+
     # High resolution binning
     if high_res_bins == 'native':
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
@@ -82,11 +73,49 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
             wavelengths, flux_transposed, flux_err_transposed, high_res_bins, method='average'
         )
-    
+        
+    n_hr = min(len(wl_hr), flux_hr.shape[0], flux_err_hr.shape[0], len(wl_err_hr))
+    wl_hr, wl_err_hr = wl_hr[:n_hr], wl_err_hr[:n_hr]
+    flux_hr, flux_err_hr = flux_hr[:n_hr, :], flux_err_hr[:n_hr, :]
+
     flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr, norm_range=oot_mask)
     flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr, norm_range=oot_mask)
 
-    
+    '''
+    if flux_err_lr.ndim == 2:
+        nanmask_lr = np.any(np.isnan(flux_err_lr), axis=1)
+    else:
+        nanmask_lr = np.isnan(flux_err_lr)
+    if flux_err_hr.ndim == 2:
+        nanmask_hr = np.any(np.isnan(flux_err_hr), axis=1)
+    else:
+        nanmask_hr = np.isnan(flux_err_hr)
+
+    wl_lr, wl_err_lr = wl_lr[~nanmask_lr], wl_err_lr[~nanmask_lr]
+    flux_lr, flux_err_lr = flux_lr[~nanmask_lr], flux_err_lr[~nanmask_lr]
+
+    wl_hr, wl_err_hr = wl_hr[~nanmask_hr], wl_err_hr[~nanmask_hr]
+    flux_hr, flux_err_hr = flux_hr[~nanmask_hr], flux_err_hr[~nanmask_hr]
+    '''
+    keep_wl_lr = np.isfinite(flux_lr).all(axis=1) & np.isfinite(flux_err_lr).all(axis=1)
+    wl_lr, wl_err_lr = wl_lr[keep_wl_lr], wl_err_lr[keep_wl_lr]
+    flux_lr, flux_err_lr = flux_lr[keep_wl_lr, :], flux_err_lr[keep_wl_lr, :]
+
+    keep_wl_hr = np.isfinite(flux_hr).all(axis=1) & np.isfinite(flux_err_hr).all(axis=1)
+    wl_hr, wl_err_hr = wl_hr[keep_wl_hr], wl_err_hr[keep_wl_hr]
+    flux_hr, flux_err_hr = flux_hr[keep_wl_hr, :], flux_err_hr[keep_wl_hr, :]
+
+    keep_t_lr = np.isfinite(flux_lr).all(axis=0) & np.isfinite(flux_err_lr).all(axis=0)
+    keep_t_hr = np.isfinite(flux_hr).all(axis=0) & np.isfinite(flux_err_hr).all(axis=0)
+    keep_t_post = keep_t_lr & keep_t_hr
+
+    flux_lr, flux_err_lr = flux_lr[:, keep_t_post], flux_err_lr[:, keep_t_post]
+    flux_hr, flux_err_hr = flux_hr[:, keep_t_post], flux_err_hr[:, keep_t_post]
+
+    assert wl_lr.shape[0] == flux_lr.shape[0] == flux_err_lr.shape[0] == wl_err_lr.shape[0], "LR channels misaligned"
+    assert wl_hr.shape[0] == flux_hr.shape[0] == flux_err_hr.shape[0] == wl_err_hr.shape[0], "HR channels misaligned"
+
+
     return {
         'wavelengths_lr': wl_lr, 'wavelengths_err_lr': wl_err_lr, 
         'flux_lr': flux_lr, 'flux_err_lr': flux_err_lr,
