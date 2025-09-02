@@ -19,3 +19,10 @@ source /project/<pi>/<cnetid>/miniconda3/bin/activate
 conda activate /project/<pi>/<cnetid>/miniconda3/envs/<conda env>
 module load cuda/12.9
 python /project/<pi>/<cnetid>/fit_jwst.py -c /project/<pi>/<cnetid>/config.yaml
+
+
+
+### Helpful rcc commands
+sbatch <script>.sbatch # starts script
+squeue --state=RUNNING --user=<cnetid> # checks script 
+scancel <id> # to cancel script if error
