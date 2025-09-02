@@ -114,7 +114,7 @@ def unpack_niriss_exoted(infile, order):
 
     return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
-def unpack_nirspec_exoted(infile):    
+def unpack_nirspec_exoted(infile, instrument):    
 
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
@@ -125,10 +125,11 @@ def unpack_nirspec_exoted(infile):
     wave_err = wave_err[5:-5]
     fluxcube = fluxcube[:, 5:-5]
     fluxcube_err = fluxcube_err[:, 5:-5]
-    
-    ii = np.where(wave >= 2.87)[0]
-    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
-    wave, wave_err = wave[ii], wave_err[ii]
+
+    if instrument != 'NIRSPEC/PRISM':
+        ii = np.where(wave >= 2.87)[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
     
     wavelength = wave
     wavelength_err = wave_err
