@@ -132,7 +132,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument)
         mini_instrument = nrs
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
