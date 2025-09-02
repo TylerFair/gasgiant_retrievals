@@ -26,3 +26,11 @@ python /project/<pi>/<cnetid>/fit_jwst.py -c /project/<pi>/<cnetid>/config.yaml
 sbatch <script>.sbatch # starts script
 squeue --state=RUNNING --user=<cnetid> # checks script 
 scancel <id> # to cancel script if error
+
+### Using rcc in vs code
+1. open vs code
+2. bottom left blue symbol -> ssh
+3. top bar host cnetid@midway3.rcc.uchicago.edu
+4. password & press 1 for push
+5. top left file -> open folder -> /home/project/<pi>/<cnetid>
+
