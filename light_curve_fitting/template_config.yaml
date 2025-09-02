@@ -29,6 +29,7 @@ resolution:
 
 flags:
   detrending_type: 'linear'  # Type of detrending: 
+                                # none = no detrending. 
                                 # linear = offset + linear with time term,
                                 # gp = whitelight gp on CPU which is subtracted from multiwavelength, and then linear on GPU, 
                                 # explinear = linear with Aexp(-t/tau) ramp. 
