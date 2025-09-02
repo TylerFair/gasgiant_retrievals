@@ -5,4 +5,4 @@ conda create -n <name> python=3.10
 pip install jaxoplanet
 pip install jax[cuda12]
 # not needed if doing own binning: pip install exotedrf[stage4]
-pip install matplotlib, astropy, celerite2, tinygp, corner, arviz, pandas 
+pip install matplotlib, astropy, tinygp, corner, arviz, pandas 
