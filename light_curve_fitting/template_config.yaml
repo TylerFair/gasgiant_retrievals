@@ -26,7 +26,11 @@ fits_file: 'xyz.fits' # fits file in input_dir.
 resolution:
   high: 400 # instrument resolution to bin to; 'native' for native resolution. 
   low:  40 #  instrument resolution to bin to [optional: not triggered if low-res flag is False]
-
+  
+pixels:
+  high: 20 # instrument pixels to bin to (cannot be both resolution and pixels) 
+  low: 100 # instrument pixels to bin to (cannot be both resolution and pixels) 
+  
 flags:
   detrending_type: 'linear'  # Type of detrending: 
                                 # none = no detrending. 
