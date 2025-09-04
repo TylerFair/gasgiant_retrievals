@@ -96,7 +96,7 @@ def create_whitelight_model(detrend_type='linear'):
         u = numpyro.sample("u", distx.QuadLDParams()) #numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
         depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-        log_jitter = numpyro.sample('log_jitter', dist.Uniform(-6, 0))
+        log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)))
         jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter))
         
         params = {
@@ -185,7 +185,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         b = numpyro.deterministic('b', jnp.abs(_b))
         depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-        log_jitter = numpyro.sample('log_jitter', dist.Uniform(-6, 0).expand([num_lcs]))
+        log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)).expand([num_lcs]))
         jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter)[...,None])
                                    
         if ld_mode == 'free':
