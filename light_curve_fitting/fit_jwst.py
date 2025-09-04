@@ -97,7 +97,9 @@ def create_whitelight_model(detrend_type='linear'):
         u = numpyro.sample("u", distx.QuadLDParams()) #numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
         depths = numpyro.sample('depths', dist.TruncatedNormal(prior_params['rors']**2, prior_params['rors']**2 * 0.2, low=0.0, high=1.0))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-
+        log_jitter = numpyro.sample('log_jitter', dist.Uniform(-6, 0))
+        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter))
+        
         params = {
             "period": prior_params['period'], "duration": duration, "t0": t0, "b": b,
             "rors": rors, "u": u,
@@ -108,7 +110,7 @@ def create_whitelight_model(detrend_type='linear'):
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_linear(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
 
         elif detrend_type == 'explinear':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
@@ -116,7 +118,7 @@ def create_whitelight_model(detrend_type='linear'):
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
             params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_explinear(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
         elif detrend_type == 'spot':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
@@ -124,10 +126,10 @@ def create_whitelight_model(detrend_type='linear'):
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01)) #  15 min uncertainty
             params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01)) # 15 min half-width
             lc_model = compute_lc_spot(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
         elif detrend_type == 'none':
             lc_model = compute_lc_none(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, yerr), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
                 
         elif detrend_type == 'gp':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
@@ -184,7 +186,9 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         b = numpyro.deterministic('b', jnp.abs(_b))
         depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-
+        log_jitter = numpyro.sample('log_jitter', dist.Uniform(-6, 0).expand([num_lcs]))
+        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter))
+                                   
         if ld_mode == 'free':
             u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
         elif ld_mode == 'fixed':
@@ -231,7 +235,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-        numpyro.sample('obs', dist.Normal(y_model, yerr), obs=y)
+        numpyro.sample('obs', dist.Normal(y_model, jitter), obs=y)
 
     return _vectorized_model_static
     
