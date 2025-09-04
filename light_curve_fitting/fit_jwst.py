@@ -186,7 +186,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(-6, 0).expand([num_lcs]))
-        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter))
+        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter)[...,None])
                                    
         if ld_mode == 'free':
             u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
