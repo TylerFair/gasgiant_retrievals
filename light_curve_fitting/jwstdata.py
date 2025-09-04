@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import jax.numpy as jnp
 import pickle
-from exotedrf.stage4 import bin_at_resolution, bin_at_pixels
+from exotedrf.stage4 import bin_at_resolution, bin_at_pixel
 import new_unpack
 import jax
 import matplotlib.pyplot as plt 
