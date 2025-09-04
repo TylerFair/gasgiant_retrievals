@@ -20,7 +20,6 @@ import new_unpack
 import argparse
 import yaml
 import arviz as az 
-from exotedrf.stage4 import bin_at_resolution
 from jwstdata import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
 #pd.set_option('display.max_columns', None)
