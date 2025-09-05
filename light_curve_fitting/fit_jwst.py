@@ -541,6 +541,9 @@ def main():
     elif bins == pixels:
         spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}pix_{high_resolution_bins}pix.pkl'
 
+    lr_bin_str = f'R{low_resolution_bins}' if bins == resolution else f'pix{low_resolution_bins}'
+    hr_bin_str = f'R{high_resolution_bins}' if bins == resolution else f'pix{high_resolution_bins}'
+
     if not os.path.exists(spectro_data_file) or mask_start is not False:
         data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
         data.save(spectro_data_file)
@@ -1135,7 +1138,6 @@ def main():
         flux_lr = flux_lr[:, valid]
         flux_err_lr    = flux_err_lr[:, valid]
 
-        lr_bin_str = f'R{low_resolution_bins}' if bins == resolution else f'pix{low_resolution_bins}'
         
         print("Plotting low-resolution fits and residuals...")
         plot_map_fits(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
@@ -1257,7 +1259,6 @@ def main():
     
     model_run_args_hr = {}
     wl_hr = np.array(data.wavelengths_hr)
-    hr_bin_str = f'R{high_resolution_bins}' if bins == resolution else f'pix{high_resolution_bins}'
 
     if hr_ld_mode == 'interpolated':
         u1_interp_hr = np.polyval(best_poly_coeffs_u1, wl_hr)
