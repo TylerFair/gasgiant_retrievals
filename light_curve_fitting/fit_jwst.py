@@ -1410,6 +1410,7 @@ def main():
         "t0": jnp.nanmedian(samples_hr["t0"]),
         "b": jnp.nanmedian(samples_hr["b"]),
         "rors": jnp.nanmedian(samples_hr["rors"], axis=0),
+        "period": PERIOD_FIXED
     }
     # include LD if fitted
     if "u" in samples_hr:
