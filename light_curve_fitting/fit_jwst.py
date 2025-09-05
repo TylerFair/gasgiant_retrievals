@@ -833,16 +833,16 @@ def main():
     
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
     
-    
+            median_jitter_wl = np.nanmedian(wl_samples['jitter'])
             plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
-            plt.scatter(data.wl_time, data.wl_flux, c='k', s=1)
+            plt.errorbar(data.wl_time, data.wl_flux, yerr=median_jitter_wl, fmt='.', c='k', ms=1)
     
            # plt.title('WL GP fit')
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.show()
             plt.close()
     
-            plt.scatter(data.wl_time, wl_residual, c='k', s=2)
+            plt.errorbar(data.wl_time, wl_residual, yerr=median_jitter_wl, fmt='.', c='k', ms=2)
             plt.axhline(0, c='r', lw=2)
             plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
             plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
@@ -1201,10 +1201,11 @@ def main():
 
         
         print("Plotting low-resolution fits and residuals...")
-        plot_map_fits(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
+        median_jitter_lr = np.nanmedian(samples_lr['jitter'], axis=0)
+        plot_map_fits(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr, map_params_lr,
                     {"period": PERIOD_FIXED},
                     f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
-        plot_map_residuals(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
+        plot_map_residuals(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr, map_params_lr,
                         {"period": PERIOD_FIXED},
                         f"{output_dir}/23_{instrument_full_str}_{lr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
 
@@ -1262,9 +1263,11 @@ def main():
         rms_vals = jax.vmap(calc_rms)(flux_lr)
 
         plt.figure(figsize=(8,5))
-        plt.scatter(data.wavelengths_lr, rms_vals, c='k')
+        plt.scatter(data.wavelengths_lr, rms_vals * 1e6, c='k', label='Measured RMS')
+        plt.scatter(data.wavelengths_lr, median_jitter_lr * 1e6, c='r', marker='x', label='Derived Jitter')
         plt.xlabel("Wavelength (μm)")
         plt.ylabel("Per Wavelength Noise (ppm)")
+        plt.legend()
        # plt.title("Out‑of‑Transit RMS vs Wavelength")
         plt.tight_layout()
         plt.savefig(f'{output_dir}/24_{instrument_full_str}_{lr_bin_str}_rms.png')
@@ -1451,10 +1454,11 @@ def main():
 
     
     print("Plotting high-resolution fits and residuals...")
-    plot_map_fits(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, map_params_hr,
+    median_jitter_hr = np.nanmedian(samples_hr['jitter'], axis=0)
+    plot_map_fits(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr, map_params_hr,
                 {"period": PERIOD_FIXED},
                 f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
-    plot_map_residuals(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, map_params_hr,
+    plot_map_residuals(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr, map_params_hr,
                     {"period": PERIOD_FIXED},
                     f"{output_dir}/35_{instrument_full_str}_{hr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
 
@@ -1506,11 +1510,14 @@ def main():
         return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
+    median_jitter_hr = np.nanmedian(samples_hr['jitter'], axis=0)
 
     plt.figure(figsize=(8,5))
-    plt.scatter(wl_hr, rms_vals*1e6, c='k')
+    plt.scatter(wl_hr, rms_vals*1e6, c='k', label='Measured RMS')
+    plt.scatter(wl_hr, median_jitter_hr * 1e6, c='r', marker='x', label='Derived Jitter')
     plt.xlabel("Wavelength (μm)")
     plt.ylabel("Per-Wavelength Noise (ppm)")
+    plt.legend()
    # plt.title("Out‑of‑Transit RMS vs Wavelength")
     plt.tight_layout()
     plt.savefig(f'{output_dir}/32_{instrument_full_str}_{hr_bin_str}_rms.png')

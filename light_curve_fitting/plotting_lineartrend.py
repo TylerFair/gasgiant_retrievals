@@ -5,7 +5,7 @@ from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 import jax.numpy as jnp
 
-def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
+def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
     """
     Plot the MAP fits for each wavelength. The transit parameters (period, duration, 
     impact parameter, and transit time) are provided via transit_params, and detrend_offset 
@@ -51,7 +51,7 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
             
         model = model + trend      
-        ax.errorbar(t, indiv_y[i], yerr=yerr[i], fmt='.', alpha=0.3,
+        ax.errorbar(t, indiv_y[i], yerr=jitter[i], fmt='.', alpha=0.3,
                     color=colors[i], label='Data', ms=1, zorder=2)
         ax.plot(t, model, c='k', alpha=1, lw=2.8,
                 label='MAP Model', zorder=3)
@@ -65,7 +65,7 @@ def plot_map_fits(t, indiv_y, yerr, wavelengths, map_params, transit_params, fil
     return fig
 
 
-def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
+def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
     """
     Plot the residuals for each wavelength using the transit parameters provided via transit_params.
     """
@@ -110,7 +110,7 @@ def plot_map_residuals(t, indiv_y, yerr, wavelengths, map_params, transit_params
         model = model + trend
         residuals = indiv_y[i] - model
         
-        ax.errorbar(t, residuals, yerr=yerr[i], fmt='.', alpha=0.3,
+        ax.errorbar(t, residuals, yerr=jitter[i], fmt='.', alpha=0.3,
                     ms=1, color=colors[i])
         ax.axhline(y=0, color='k', alpha=1, lw=2.8, zorder=3)
         ax.text(0.05, 0.95, f'λ = {wavelengths[i]:.3f} μm',
