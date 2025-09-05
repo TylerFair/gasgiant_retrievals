@@ -15,7 +15,7 @@ import pandas as pd
 from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 from exotic_ld import StellarLimbDarkening
-from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmission_spectrum
+from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmission_spectrum, plot_wavelength_offset_summary
 import new_unpack
 import argparse
 import yaml
@@ -1202,12 +1202,10 @@ def main():
         
         print("Plotting low-resolution fits and residuals...")
         median_jitter_lr = np.nanmedian(samples_lr['jitter'], axis=0)
-        plot_map_fits(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr, map_params_lr,
-                    {"period": PERIOD_FIXED},
-                    f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
-        plot_map_residuals(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr, map_params_lr,
-                        {"period": PERIOD_FIXED},
-                        f"{output_dir}/23_{instrument_full_str}_{lr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
+        plot_wavelength_offset_summary(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr,
+                                     map_params_lr, {"period": PERIOD_FIXED},
+                                     f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
+                                     detrend_type=detrend_type_multiwave)
 
         # Polynomial Fitting for Interpolation
         poly_orders = [1, 2, 3, 4]
@@ -1455,12 +1453,10 @@ def main():
     
     print("Plotting high-resolution fits and residuals...")
     median_jitter_hr = np.nanmedian(samples_hr['jitter'], axis=0)
-    plot_map_fits(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr, map_params_hr,
-                {"period": PERIOD_FIXED},
-                f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
-    plot_map_residuals(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr, map_params_hr,
-                    {"period": PERIOD_FIXED},
-                    f"{output_dir}/35_{instrument_full_str}_{hr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
+    plot_wavelength_offset_summary(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr,
+                                    map_params_hr, {"period": PERIOD_FIXED},
+                                    f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
+                                    detrend_type=detrend_type_multiwave)
 
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
