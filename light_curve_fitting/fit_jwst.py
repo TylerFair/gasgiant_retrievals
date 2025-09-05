@@ -41,7 +41,62 @@ def _tree_to_f64(tree):
 def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
-        
+
+def _noise_binning_stats(residuals, n_bins=30, max_bin=None):
+    """
+    residuals: array-like, shape (n_channels, n_times)
+    Returns: bins, median_sigma, p16, p84, expected_white_sigma
+    """
+    residuals = np.array(residuals)
+    if residuals.ndim == 1:
+        residuals = residuals[None, :]
+    n_channels, n_times = residuals.shape
+    if max_bin is None:
+        max_bin = max(1, n_times // 4)
+    # logarithmically spaced bin sizes between 1 and max_bin
+    bins = np.unique(np.round(np.logspace(0, np.log10(max_bin), n_bins)).astype(int))
+    sigma_b_channels = np.full((n_channels, len(bins)), np.nan)
+    for i in range(n_channels):
+        r = residuals[i, :]
+        for j, b in enumerate(bins):
+            m = (n_times // b) * b
+            if m < b:
+                sigma_b_channels[i, j] = np.nan
+                continue
+            r_trunc = r[:m].reshape(-1, b)
+            means = r_trunc.mean(axis=1)
+            if means.size > 1:
+                sigma_b_channels[i, j] = np.std(means, ddof=1)
+            else:
+                sigma_b_channels[i, j] = 0.0
+    sigma_med = np.nanmedian(sigma_b_channels, axis=0)
+    sigma_16 = np.nanpercentile(sigma_b_channels, 16, axis=0)
+    sigma_84 = np.nanpercentile(sigma_b_channels, 84, axis=0)
+    # expected white-noise scaling using median unbinned sigma across channels
+    sigma1_channels = np.nanstd(residuals, axis=1, ddof=1)
+    sigma1_med = np.nanmedian(sigma1_channels)
+    expected_white = sigma1_med / np.sqrt(bins)
+    return bins, sigma_med, sigma_16, sigma_84, expected_white
+    
+def plot_noise_binning(residuals, outpath, title=None):
+    """
+    Create a log-log plot of binned noise vs bin size and save to outpath.
+    residuals shape: (n_channels, n_times) or (n_times,)
+    """
+    bins, sigma_med, sigma_16, sigma_84, expected_white = _noise_binning_stats(residuals)
+    plt.figure(figsize=(6,4))
+    plt.loglog(bins, sigma_med, 'k-o', label='Measured (median across channels)')
+    plt.fill_between(bins, sigma_16, sigma_84, color='gray', alpha=0.3, label='16-84%')
+    plt.loglog(bins, expected_white, 'r--', label='White-noise expectation (σ₁/√N)')
+    plt.xlabel('Bin size (number of points)')
+    plt.ylabel('RMS')
+    if title is not None:
+        plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(outpath)
+    plt.close()
+    print(f"Saved noise-binning plot to {outpath}")       
 def spot_crossing(t, amp, mu, sigma):
     return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
     
@@ -1089,6 +1144,12 @@ def main():
         model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
         
         residuals = flux_lr - model_all
+        plot_noise_binning(
+        residuals,
+        f"{output_dir}/25_{instrument_full_str}_{lr_bin_str}_noisebin.png",
+        title=f"Noise binning — Low-res {lr_bin_str}"
+        )
+
 
         medians = np.nanmedian(residuals, axis=1, keepdims=True)
         sigmas    = 1.4826 * np.nanmedian(np.abs(residuals - medians), axis=1, keepdims=True)
@@ -1343,6 +1404,59 @@ def main():
         init_params=init_params_hr,
         **model_run_args_hr 
     )
+    map_params_hr = {
+        "duration": jnp.nanmedian(samples_hr["duration"]),
+        "t0": jnp.nanmedian(samples_hr["t0"]),
+        "b": jnp.nanmedian(samples_hr["b"]),
+        "rors": jnp.nanmedian(samples_hr["rors"], axis=0),
+    }
+    # include LD if fitted
+    if "u" in samples_hr:
+        map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
+    # include trend terms if present in samples
+    if detrend_type_multiwave != 'none' and "c" in samples_hr:
+        map_params_hr["c"] = jnp.nanmedian(samples_hr["c"], axis=0)
+        map_params_hr["v"] = jnp.nanmedian(samples_hr["v"], axis=0)
+    if detrend_type_multiwave == 'explinear' and "A" in samples_hr:
+        map_params_hr["A"] = jnp.nanmedian(samples_hr["A"], axis=0)
+        map_params_hr["tau"] = jnp.nanmedian(samples_hr["tau"], axis=0)
+    if detrend_type_multiwave == 'spot' and "spot_amp" in samples_hr:
+        map_params_hr["spot_amp"] = jnp.nanmedian(samples_hr["spot_amp"], axis=0)
+        map_params_hr["spot_mu"]  = jnp.nanmedian(samples_hr["spot_mu"], axis=0)
+        map_params_hr["spot_sigma"] = jnp.nanmedian(samples_hr["spot_sigma"], axis=0)
+
+    # prepare in_axes similar to low-res mapping so jax.vmap works
+    in_axes_map_hr = {"rors": 0, "u": 0}
+    if detrend_type_multiwave != 'none':
+        in_axes_map_hr.update({"c": 0, "v": 0})
+    if detrend_type_multiwave == 'explinear':
+        in_axes_map_hr.update({"A": 0, "tau": 0})
+    if detrend_type_multiwave == 'spot':
+        in_axes_map_hr.update({"spot_amp": 0, "spot_mu": 0, "spot_sigma": 0})
+
+    final_in_axes_hr = {k: in_axes_map_hr.get(k, None) for k in map_params_hr.keys()}
+
+    # compute model and residuals on the HR time grid
+    selected_kernel_hr = COMPUTE_KERNELS[detrend_type_multiwave]
+    model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None))(map_params_hr, time_hr)
+    residuals_hr = np.array(flux_hr - model_all_hr)
+
+    # save noise-binning plot
+    plot_noise_binning(
+        residuals_hr,
+        f"{output_dir}/36_{instrument_full_str}_{hr_bin_str}_noisebin.png",
+        title=f"Noise binning — High-res {hr_bin_str}"
+    )
+
+
+    
+    print("Plotting high-resolution fits and residuals...")
+    plot_map_fits(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, map_params_hr,
+                {"period": PERIOD_FIXED},
+                f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
+    plot_map_residuals(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, map_params_hr,
+                    {"period": PERIOD_FIXED},
+                    f"{output_dir}/35_{instrument_full_str}_{hr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
 
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
