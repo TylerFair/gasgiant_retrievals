@@ -455,7 +455,21 @@ def main():
 
 
     flags = cfg.get('flags', {})
-    bins = cfg.get('resolution', {})
+    resolution = cfg.get('resolution', None)
+    pixels = cfg.get('pixels', None)
+    if resolution is None:
+        if pixels is None:
+            raise ValueError('Must Specify Resolutions or Pixels')
+        bins = pixels 
+        high_resolution_bins = bins.get('high', None)
+        low_resolution_bins = bins.get('low', None)
+    elif pixels is None:
+        if resolution is None:
+            raise ValueError('Must specify resolution or pixels')
+        bins = resolution
+        high_resolution_bins = bins.get('high', None)
+        low_resolution_bins = bins.get('low', None)
+    
     outlier_clip = cfg.get('outlier_clip', {})
     planet_str = planet_cfg['name']
 
@@ -495,8 +509,7 @@ def main():
     save_trace = flags.get('save_whitelight_trace', False)
     
     # binning seperation
-    high_resolution_bins = bins.get('high', 1)
-    low_resolution_bins = bins.get('low', 100)
+
 
     # outlier clipping
     whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
@@ -520,9 +533,13 @@ def main():
         M_H=stellar_feh, Teff=stellar_teff, logg=stellar_logg, ld_model=ld_model,
         ld_data_path=ld_data_path
     )
+    
     mini_instrument = 'order'+str(order) if instrument == 'NIRISS/SOSS' else 'nrs'+str(nrs) if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' else ''
     instrument_full_str = f"{planet_str}_{instrument.replace('/', '_')}_{mini_instrument}"
-    spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
+    if bins == resolution: 
+        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}LR_{high_resolution_bins}HR.pkl'
+    elif bins == pixels:
+        spectro_data_file = output_dir + f'/{instrument_full_str}_spectroscopy_data_{low_resolution_bins}pix_{high_resolution_bins}pix.pkl'
 
     if not os.path.exists(spectro_data_file) or mask_start is not False:
         data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
@@ -911,7 +928,7 @@ def main():
 
     # --- Low-resolution Analysis ---
     if need_lowres_analysis:
-        print(f"\n--- Running Low-Resolution Analysis (Binned to R{low_resolution_bins}) ---")
+        print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
 
         ##### APPLY OUTLIER MASK HERE ####
         time_lr = jnp.array(data.time[~wl_mad_mask])
@@ -1118,13 +1135,15 @@ def main():
         flux_lr = flux_lr[:, valid]
         flux_err_lr    = flux_err_lr[:, valid]
 
+        lr_bin_str = f'R{low_resolution_bins}' if bins == resolution else f'pix{low_resolution_bins}'
+        
         print("Plotting low-resolution fits and residuals...")
         plot_map_fits(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
                     {"period": PERIOD_FIXED},
-                    f"{output_dir}/22_{instrument_full_str}_R{low_resolution_bins}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
+                    f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_bestfit.png", ncols=5, detrend_type=detrend_type_multiwave)
         plot_map_residuals(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, map_params_lr,
                         {"period": PERIOD_FIXED},
-                        f"{output_dir}/23_{instrument_full_str}_R{low_resolution_bins}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
+                        f"{output_dir}/23_{instrument_full_str}_{lr_bin_str}_residual.png", ncols=5, detrend_type=detrend_type_multiwave)
 
         # Polynomial Fitting for Interpolation
         poly_orders = [1, 2, 3, 4]
@@ -1138,10 +1157,10 @@ def main():
 
             plot_poly_fit(wl_lr, trend_c_lr, best_poly_coeffs_c, best_order_c,
                             "Wavelength (μm)", "Trend coefficient c", "Trend Offset (c) Polynomial Fit",
-                            f"{output_dir}/2optional1_{instrument_full_str}_R{low_resolution_bins}_cinterp.png")
+                            f"{output_dir}/2optional1_{instrument_full_str}_{lr_bin_str}_cinterp.png")
             plot_poly_fit(wl_lr, trend_v_lr, best_poly_coeffs_v, best_order_v,
                             "Wavelength (μm)", "Trend coefficient v", "Trend Slope (v) Polynomial Fit",
-                            f"{output_dir}/2optional2_{instrument_full_str}_R{low_resolution_bins}_vinterp.png")
+                            f"{output_dir}/2optional2_{instrument_full_str}_{lr_bin_str}_vinterp.png")
         if detrend_type_multiwave == 'explinear':
             best_poly_coeffs_A, best_order_A, _ = fit_polynomial(wl_lr, trend_A_lr, poly_orders)
             best_poly_coeffs_tau, best_order_tau, _ = fit_polynomial(wl_lr, trend_tau_lr, poly_orders)
@@ -1160,16 +1179,16 @@ def main():
             print(f"Selected polynomial degrees: u1={best_order_u1}, u2={best_order_u2}")
             plot_poly_fit(wl_lr, ld_u_lr[:,:, 0], best_poly_coeffs_u1, best_order_u1,
                         "Wavelength (μm)", "LD coefficient u1", "Limb Darkening u1 Polynomial Fit",
-                        f"{output_dir}/2optional3_{instrument_full_str}_R{low_resolution_bins}_u1interp.png")
+                        f"{output_dir}/2optional3_{instrument_full_str}_{lr_bin_str}_u1interp.png")
             plot_poly_fit(wl_lr, ld_u_lr[:,:, 1], best_poly_coeffs_u2, best_order_u2,
                         "Wavelength (μm)", "LD coefficient u2", "Limb Darkening u2 Polynomial Fit",
-                        f"{output_dir}/2optional4_{instrument_full_str}_R{low_resolution_bins}_u2interp.png")
+                        f"{output_dir}/2optional4_{instrument_full_str}_{lr_bin_str}_u2interp.png")
 
 
         print("Plotting and saving lowres transmission spectrum...")
         plot_transmission_spectrum(wl_lr, samples_lr["rors"],
-                            f"{output_dir}/24_{instrument_full_str}_R{low_resolution_bins}_spectrum.png")
-        save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_R{low_resolution_bins}.csv")
+                            f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum.png")
+        save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
 
         oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)
 
@@ -1185,10 +1204,10 @@ def main():
         plt.ylabel("Per Wavelength Noise (ppm)")
        # plt.title("Out‑of‑Transit RMS vs Wavelength")
         plt.tight_layout()
-        plt.savefig(f'{output_dir}/24_{instrument_full_str}_R{low_resolution_bins}_rms.png')
+        plt.savefig(f'{output_dir}/24_{instrument_full_str}_{lr_bin_str}_rms.png')
         plt.close()
     # --- High-resolution Analysis ---
-    print(f"\n--- Running High-Resolution Analysis (Binned to R{high_resolution_bins}) ---")
+    print(f"\n--- Running High-Resolution Analysis (Binned to {lr_bin_str}) ---")
 
     ##### APPLY OUTLIER MASK HERE ####
     time_hr = jnp.array(data.time[~wl_mad_mask])
@@ -1238,7 +1257,8 @@ def main():
     
     model_run_args_hr = {}
     wl_hr = np.array(data.wavelengths_hr)
-    
+    hr_bin_str = f'R{high_resolution_bins}' if bins == resolution else f'pix{high_resolution_bins}'
+
     if hr_ld_mode == 'interpolated':
         u1_interp_hr = np.polyval(best_poly_coeffs_u1, wl_hr)
         u2_interp_hr = np.polyval(best_poly_coeffs_u2, wl_hr)
@@ -1325,8 +1345,8 @@ def main():
 
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
-                            f"{output_dir}/31_{instrument_full_str}_R{high_resolution_bins}_spectrum.png")
-    save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_R{high_resolution_bins}.csv")
+                            f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum.png")
+    save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
 
     if "u" in samples_hr:
         u1_16, u1_median, u1_84 = np.percentile(np.array(samples_hr["u"][:,:,0]), [16, 50, 84], axis=0) # Shape: (n_samples, n_lcs, 2)
@@ -1345,7 +1365,7 @@ def main():
         plt.xlabel('Wavelength (micron)')
         plt.ylabel('u1')
         plt.tight_layout()
-        u1_save_path = f'{output_dir}/3optional1_{instrument_full_str}_R{high_resolution_bins}_u1.png'
+        u1_save_path = f'{output_dir}/3optional1_{instrument_full_str}_{hr_bin_str}_u1.png'
         plt.savefig(u1_save_path)
         print(f"Saved u1 plot with uncertainties to {u1_save_path}")
         plt.close()
@@ -1356,7 +1376,7 @@ def main():
         plt.xlabel('Wavelength (micron)')
         plt.ylabel('u2')
         plt.tight_layout()
-        u2_save_path = f'{output_dir}/3optional2_{instrument_full_str}_R{high_resolution_bins}_u2.png'
+        u2_save_path = f'{output_dir}/3optional2_{instrument_full_str}_{hr_bin_str}_u2.png'
         plt.savefig(u2_save_path)
         print(f"Saved u2 plot with uncertainties to {u2_save_path}")
         plt.close()
@@ -1378,7 +1398,7 @@ def main():
     plt.ylabel("Per-Wavelength Noise (ppm)")
    # plt.title("Out‑of‑Transit RMS vs Wavelength")
     plt.tight_layout()
-    plt.savefig(f'{output_dir}/32_{instrument_full_str}_R{high_resolution_bins}_rms.png')
+    plt.savefig(f'{output_dir}/32_{instrument_full_str}_{hr_bin_str}_rms.png')
     plt.close()
 
     #depth_hr = np.nanmedian(samples_hr["depths"], axis=0) 
