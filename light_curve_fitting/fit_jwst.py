@@ -186,8 +186,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         depths = numpyro.sample('depths', dist.TruncatedNormal(mu_depths, 0.2 * jnp.ones_like(mu_depths), low=0.0, high=1.0).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)).expand([num_lcs]))
-        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter)[...,None])
-                                   
+        jitter = jnp.exp(log_jitter)
+        jitter_broadcast = jitter[:,None] * jnp.ones_like(t)                                   
         if ld_mode == 'free':
             u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
         elif ld_mode == 'fixed':
@@ -234,7 +234,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-        numpyro.sample('obs', dist.Normal(y_model, jitter), obs=y)
+        numpyro.sample('obs', dist.Normal(y_model, jitter_broadcast), obs=y)
 
     return _vectorized_model_static
     
