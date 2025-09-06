@@ -70,7 +70,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if high_res_bins == 'native':
+        if resolution.get('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
@@ -110,7 +110,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if high_res_bins == 'native':
+        if pixels.bin('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_pixel(
