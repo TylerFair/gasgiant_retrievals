@@ -833,7 +833,7 @@ def main():
     
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
     
-            median_jitter_wl = np.nanmedian(wl_samples['jitter'])
+            median_jitter_wl = np.nanmedian(jnp.exp(wl_samples['log_jitter']))
             plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
             plt.errorbar(data.wl_time, data.wl_flux, yerr=median_jitter_wl, fmt='.', c='k', ms=1)
     
@@ -1201,7 +1201,7 @@ def main():
 
         
         print("Plotting low-resolution fits and residuals...")
-        median_jitter_lr = np.nanmedian(samples_lr['jitter'], axis=0)
+        median_jitter_lr = np.nanmedian(jnp.exp(samples_lr['log_jitter']), axis=0)
         plot_wavelength_offset_summary(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
@@ -1453,7 +1453,7 @@ def main():
 
     
     print("Plotting high-resolution fits and residuals...")
-    median_jitter_hr = np.nanmedian(samples_hr['jitter'], axis=0)
+    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['log_jitter']), axis=0)
     plot_wavelength_offset_summary(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
@@ -1507,7 +1507,7 @@ def main():
         return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
-    median_jitter_hr = np.nanmedian(samples_hr['jitter'], axis=0)
+    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['jitter']), axis=0)
 
     plt.figure(figsize=(8,5))
     plt.scatter(wl_hr, rms_vals*1e6, c='k', label='Measured RMS')
