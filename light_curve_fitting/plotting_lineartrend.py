@@ -284,8 +284,8 @@ def plot_wavelength_offset_summary(
     plt.subplots_adjust(wspace=0.02)  # almost touching
     
     ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=False, prune=None))
-    ax2.yaxis.set_ticks(ax1.get_yticks())
-
+    #ax2.yaxis.set_ticks(ax1.get_yticks())
+    
     plt.tight_layout()
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     return fig
