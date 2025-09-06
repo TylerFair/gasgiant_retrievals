@@ -155,7 +155,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 
 def plot_wavelength_offset_summary(
     t, indiv_y, jitter, wavelengths, map_params, transit_params,
-    filename, detrend_type='linear', use_hours=True, residual_scale=3.0,
+    filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
     align_residuals_to_model=True  # keep True for vertical alignment to left panel
 ):
     import numpy as np
@@ -249,7 +249,7 @@ def plot_wavelength_offset_summary(
         ax1.text(
             t_centered.min(), 1.0 - yoff + 0.001,
             f"{wavelengths[idx]:.2f} μm",
-            ha='left', va='bottom', color=colors[i], fontsize=8
+            ha='left', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
         )
 
         # --- Right: residuals ONLY ---
@@ -259,14 +259,14 @@ def plot_wavelength_offset_summary(
                     color=colors[i], rasterized=True)
         ax2.axhline(baseline, color=colors[i], linestyle='--', lw=0.8, alpha=0.8)
         ax2.text(
-            t_centered.max(), baseline + 0.15 * step,
+            t_centered.min(), baseline + 0.15 * step,
             f"Jitter: {jitter[idx]*1e6:.0f} ppm",
-            ha='right', va='bottom', color=colors[i], fontsize=8
+            ha='right', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
         )
 
 
     # --- dynamic y-lims (LEFT): one depth above, one below lowest min ---
-    y_top_left = 1.0 + depth_max * 0.1
+    y_top_left = 1.0 + depth_max * 0.15
     lowest_min_left = np.min(1.0 - offsets - depths)
     y_bot_left = lowest_min_left - depth_max * 0.1
     ax1.set_ylim(y_bot_left, y_top_left)
