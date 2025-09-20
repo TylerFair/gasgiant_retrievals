@@ -1507,7 +1507,7 @@ def main():
         return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
-    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['jitter']), axis=0)
+    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['log_jitter']), axis=0)
 
     plt.figure(figsize=(8,5))
     plt.scatter(wl_hr, rms_vals*1e6, c='k', label='Measured RMS')
