@@ -32,7 +32,9 @@ class SpectroData:
 def normalize_flux(flux, flux_err, norm_range):
     """Normalize flux arrays by median of first 50 points."""
     flux = np.array(flux)
+    flux_err = np.array(flux_err)
     flux_norm = flux * 1.0
+    flux_err_norm = flux_err * 1.0
     
     for i in range(flux.shape[0]):
         if norm_range is None or np.sum(norm_range) == 0:
@@ -41,7 +43,7 @@ def normalize_flux(flux, flux_err, norm_range):
         else:
             norm = np.nanmedian(flux[i, norm_range])
         flux_norm[i, :] /= norm
-    flux_err_norm = np.ones_like(flux_norm)
+        flux_err_norm[i, :] /= norm
         
     return flux_norm, flux_err_norm
 
@@ -70,7 +72,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if resolution.get('high') == 'native':
+        if high_res_bins == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
@@ -110,7 +112,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if pixels.bin('high') == 'native':
+        if high_res_bins == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_pixel(
@@ -174,7 +176,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wavelengths_err = np.array(wavelengths_err)
     time = np.array(time)
     flux_unbinned = np.array(flux_unbinned)  # Shape: (n_time, n_wavelength)
-    flux_err_unbinned = np.ones_like(flux_unbinned)
+    flux_err_unbinned = np.array(flux_err_unbinned) 
     
     # Remove NaN columns
     nanmask = np.all(np.isnan(flux_unbinned), axis=0)
@@ -213,7 +215,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     
     wlc = np.nansum(flux_unbinned, axis=1)
     wl_flux = wlc/np.nanmedian(wlc[oot_mask], axis=0)
-    wl_flux_err = 1.0
+    wl_flux_err = np.nanmedian(np.abs(0.5*(wl_flux[0:-2] + wl_flux[2:]) - wl_flux[1:-1]))
 
     return SpectroData(
         time=jnp.array(time),
