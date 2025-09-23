@@ -34,7 +34,7 @@ def normalize_flux(flux, flux_err, norm_range):
     flux = np.array(flux)
     flux_err = np.array(flux_err)
     flux_norm = flux * 1.0
-    flux_err_norm = flux_err * 1.0
+    flux_err_norm = flux_err * 1.0 
     
     for i in range(flux.shape[0]):
         if norm_range is None or np.sum(norm_range) == 0:
@@ -42,9 +42,9 @@ def normalize_flux(flux, flux_err, norm_range):
             norm = np.nanmedian(flux[i, norm_range_fallback])
         else:
             norm = np.nanmedian(flux[i, norm_range])
-        flux_norm[i, :] /= norm
-        flux_err_norm[i, :] /= norm
-        
+        if norm > 0:
+            flux_norm[i, :] /= norm
+            flux_err_norm[i,:] /= norm 
     return flux_norm, flux_err_norm
 
 
@@ -72,7 +72,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if high_res_bins == 'native':
+        if resolution.get('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
@@ -112,7 +112,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
     
         # High resolution binning
-        if high_res_bins == 'native':
+        if pixels.bin('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_pixel(
@@ -152,7 +152,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     }
 
 
-def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None):
+def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None):
     """Main function to process spectroscopy data."""
     # Unpack data based on instrument
     if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM':
@@ -160,14 +160,14 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument, mask_integrations_start, mask_integrations_end)
         mini_instrument = nrs
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order, mask_integrations_start, mask_integrations_end)
         mini_instrument = order
     elif instrument == 'MIRI/LRS':
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_miri_exoted(fits_file)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_miri_exoted(fits_file, mask_integrations_start, mask_integrations_end)
         mini_instrument = '' 
     else:
         raise NotImplementedError(f'Instrument {instrument} not implemented yet')
@@ -177,7 +177,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     time = np.array(time)
     flux_unbinned = np.array(flux_unbinned)  # Shape: (n_time, n_wavelength)
     flux_err_unbinned = np.array(flux_err_unbinned) 
-    
     # Remove NaN columns
     nanmask = np.all(np.isnan(flux_unbinned), axis=0)
     wavelengths, wavelengths_err = wavelengths[~nanmask], wavelengths_err[~nanmask]
@@ -215,7 +214,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     
     wlc = np.nansum(flux_unbinned, axis=1)
     wl_flux = wlc/np.nanmedian(wlc[oot_mask], axis=0)
-    wl_flux_err = np.nanmedian(np.abs(0.5*(wl_flux[0:-2] + wl_flux[2:]) - wl_flux[1:-1]))
+    wl_flux_err = np.nanmedian(np.abs(np.diff(wl_flux)))
 
     return SpectroData(
         time=jnp.array(time),
