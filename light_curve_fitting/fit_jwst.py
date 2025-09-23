@@ -19,6 +19,7 @@ from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmi
 import new_unpack
 import argparse
 import yaml
+import jaxopt
 import arviz as az 
 from jwstdata import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
@@ -136,7 +137,17 @@ def compute_lc_spot(params, t):
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
     return _compute_transit_model(params, t) + params["c"]
-
+def build_gp(params, t):
+    kernel = tinygp.kernels.quasisep.Matern32(
+                scale=jnp.exp(params['GP_log_rho']),
+                sigma=jnp.exp(params['GP_log_sigma']),
+            )
+    return tinygp.GaussianProcess(kernel, t, diag=jnp.exp(params["logs2"]), 
+              mean=partial(compute_lc_gp_mean, params))
+@jax.jit
+def loss(params, t, y):
+    gp = build_gp(params, t)
+    return -gp.log_probability(y)
 def create_whitelight_model(detrend_type='linear'):
     """
     Building a static whitelight model so jax doesn't retrace. 
@@ -149,11 +160,10 @@ def create_whitelight_model(detrend_type='linear'):
         _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
         b = numpyro.deterministic('b', jnp.abs(_b))
         u = numpyro.sample("u", distx.QuadLDParams()) #numpyro.sample('u', dist.Uniform(-3.0, 3.0).expand([2]))
-        depths = numpyro.sample('depths', dist.Uniform(1e-6, 0.5))
+        depths = numpyro.sample('depths', dist.Uniform(1e-5, 0.5))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
-        log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)))
-        jitter = numpyro.deterministic('jitter', jnp.exp(log_jitter))
-        
+        log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-5), jnp.log(1e-2)))
+        error = numpyro.deterministic('error', jnp.sqrt(jnp.exp(log_jitter)**2 + yerr**2)) 
         params = {
             "period": prior_params['period'], "duration": duration, "t0": t0, "b": b,
             "rors": rors, "u": u,
@@ -164,7 +174,7 @@ def create_whitelight_model(detrend_type='linear'):
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_linear(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
 
         elif detrend_type == 'explinear':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
@@ -172,7 +182,7 @@ def create_whitelight_model(detrend_type='linear'):
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
             params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_explinear(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
         elif detrend_type == 'spot':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
@@ -180,25 +190,21 @@ def create_whitelight_model(detrend_type='linear'):
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01)) #  15 min uncertainty
             params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01)) # 15 min half-width
             lc_model = compute_lc_spot(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
         elif detrend_type == 'none':
             lc_model = compute_lc_none(params, t)
-            numpyro.sample('obs', dist.Normal(lc_model, jitter), obs=y)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
                 
         elif detrend_type == 'gp':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = 0.0 
 
-            logs2 = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
-            GP_log_sigma = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-6), jnp.log(1.0)))
-            GP_log_rho = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e3)))
+            params['logs2'] = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
+            params['GP_log_sigma']  = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
+            params['GP_log_rho']  = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e2)))
 
-            mean_func = partial(compute_lc_gp_mean, params)
-            kernel = tinygp.kernels.quasisep.Matern32(
-                scale=jnp.exp(GP_log_rho),
-                sigma=jnp.exp(GP_log_sigma),
-            )
-            gp = tinygp.GaussianProcess(kernel, t, diag=jnp.exp(logs2), mean=mean_func)
+            gp = build_gp(params, t)
+
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
         else:
             raise ValueError(f"Unknown detrend_type: {detrend_type}")
@@ -225,7 +231,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     else:
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
-    def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None,
+    def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                                mu_depths=None, PERIOD=None, trend_fixed=None,
                                ld_interpolated=None, ld_fixed=None,
                                mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None,
@@ -233,16 +239,17 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
-        logD = numpyro.sample("logD", dist.Normal(jnp.log(mu_duration), 1e-2))
-        duration = numpyro.deterministic("duration", jnp.exp(logD))
-        t0 = numpyro.sample("t0", dist.Normal(mu_t0, 1e-2))
-        _b = numpyro.sample("_b", dist.Uniform(-2.0, 2.0))
-        b = numpyro.deterministic('b', jnp.abs(_b))
-        depths = numpyro.sample('depths', dist.Uniform(1e-6,0.5).expand([num_lcs]))
+        
+        duration = mu_duration
+        t0 = mu_t0
+        b = mu_b
+
+        depths = numpyro.sample('depths', dist.Uniform(1e-5, 0.5).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)).expand([num_lcs]))
         jitter = jnp.exp(log_jitter)
-        jitter_broadcast = jitter[:,None] * jnp.ones_like(t)                                   
+        jitter_broadcast = jitter[:,None] * jnp.ones_like(t)
+        error = numpyro.deterministic('error', jnp.sqrt(jitter_broadcast**2 + yerr**2))
         if ld_mode == 'free':
             u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
         elif ld_mode == 'fixed':
@@ -289,7 +296,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-        numpyro.sample('obs', dist.Normal(y_model, jitter_broadcast), obs=y)
+        numpyro.sample('obs', dist.Normal(y_model, error), obs=y)
 
     return _vectorized_model_static
     
@@ -310,10 +317,10 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
             model,
             regularize_mass_matrix=False,
             init_strategy=numpyro.infer.init_to_value(values=init_params),
-            target_accept_prob=0.9
+            target_accept_prob=0.99
         ),
-        num_warmup=1000,
-        num_samples=1000,
+        num_warmup=3000,
+        num_samples=3000,
         progress_bar=True,
         jit_model_args=True
     )
@@ -527,6 +534,8 @@ def main():
     
     outlier_clip = cfg.get('outlier_clip', {})
     planet_str = planet_cfg['name']
+    mask_integrations_start = outlier_clip.get('mask_integrations_start', None)
+    mask_integrations_end = outlier_clip.get('mask_integrations_end', None)
 
     # Paths
     base_path = cfg.get('path', '.')
@@ -600,7 +609,7 @@ def main():
     hr_bin_str = f'R{high_resolution_bins}' if bins == resolution else f'pix{high_resolution_bins}'
 
     if not os.path.exists(spectro_data_file) or mask_start is not False:
-        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end)
+        data = process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start, mask_end, mask_integrations_start, mask_integrations_end)
         data.save(spectro_data_file)
         print("Shapes:")
         print(f"Time: {data.time.shape}")
@@ -676,6 +685,18 @@ def main():
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type)
             if detrending_type == 'spot':
                 whitelight_model_for_run = create_whitelight_model(detrend_type='linear')
+            
+            
+            
+            if detrending_type == 'gp':           
+                solver = jaxopt.ScipyMinimize(fun=loss)
+                init_params = jax.tree_util.tree_map(jnp.asarray, prior_params_wl)
+                soln = solver.run(init_params, data.wl_time, data.wl_flux)
+                prior_params_wl['GP_log_sigma'] = soln.params['GP_log_sigma'] 
+                prior_params_wl['GP_log_rho'] = soln.params['GP_log_rho']
+                prior_params_wl['logs2'] = soln.params['logs2']
+
+
             soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
             if detrending_type == 'spot':
                 amp0     = float(prior_params_wl['spot_amp'])
@@ -750,7 +771,8 @@ def main():
             
                 print(f"Using spot params: amp={prior_params_wl['spot_amp']}, mu={prior_params_wl['spot_mu']}, sigma={prior_params_wl['spot_sigma']}")
 
-                whitelight_model_for_run = create_whitelight_model(detrend_type='spot')   
+                whitelight_model_for_run = create_whitelight_model(detrend_type='spot')
+
                 soln =  optimx.optimize(whitelight_model_for_run, start=prior_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=prior_params_wl)
 
                 
@@ -833,16 +855,16 @@ def main():
     
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
     
-            median_jitter_wl = np.nanmedian(jnp.exp(wl_samples['log_jitter']))
+            median_error_wl = np.nanmedian(wl_samples['error'])
             plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
-            plt.errorbar(data.wl_time, data.wl_flux, yerr=median_jitter_wl, fmt='.', c='k', ms=1)
+            plt.errorbar(data.wl_time, data.wl_flux, yerr=median_error_wl, fmt='.', c='k', ms=1)
     
            # plt.title('WL GP fit')
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.show()
             plt.close()
     
-            plt.errorbar(data.wl_time, wl_residual, yerr=median_jitter_wl, fmt='.', c='k', ms=2)
+            plt.errorbar(data.wl_time, wl_residual, yerr=median_error_wl, fmt='.', c='k', ms=2)
             plt.axhline(0, c='r', lw=2)
             plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
             plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
@@ -1034,7 +1056,6 @@ def main():
             ld_fixed_lr = None
 
         init_params_lr = {
-            "logD": jnp.log(bestfit_params_wl['duration'][0]), "t0": bestfit_params_wl['t0'][0], "_b": bestfit_params_wl['b'][0],
             "u": U_mu_lr, "depths": jnp.full(num_lcs_lr, bestfit_params_wl['rors'][0]**2),
             }
         if detrend_type_multiwave != 'none':
@@ -1069,6 +1090,7 @@ def main():
         model_run_args_lr = {
         'mu_duration': DURATION_BASE,
         'mu_t0': T0_BASE,
+        'mu_b': B_BASE,
         'mu_depths': DEPTHS_BASE_LR,
         'PERIOD': PERIOD_FIXED,
         }
@@ -1104,9 +1126,9 @@ def main():
             trend_spot_sigma_lr = np.array(samples_lr["spot_sigma"])
             
         map_params_lr = {
-            "duration": jnp.nanmedian(samples_lr["duration"]),
-            "t0": jnp.nanmedian(samples_lr["t0"]),
-            "b": jnp.nanmedian(samples_lr["b"]),
+            "duration": DURATION_BASE,
+            "t0": T0_BASE,
+            "b": B_BASE,
             "rors": jnp.nanmedian(samples_lr["rors"], axis=0),
             "u": jnp.nanmedian(ld_u_lr, axis=0),  "period": PERIOD_FIXED,
         }
@@ -1201,8 +1223,8 @@ def main():
 
         
         print("Plotting low-resolution fits and residuals...")
-        median_jitter_lr = np.nanmedian(jnp.exp(samples_lr['log_jitter']), axis=0)
-        plot_wavelength_offset_summary(time_lr, flux_lr, median_jitter_lr, data.wavelengths_lr,
+        median_error_lr = np.nanmedian(samples_lr['error'], axis=0)
+        plot_wavelength_offset_summary(time_lr, flux_lr, median_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
                                      detrend_type=detrend_type_multiwave)
@@ -1262,7 +1284,7 @@ def main():
 
         plt.figure(figsize=(8,5))
         plt.scatter(data.wavelengths_lr, rms_vals * 1e6, c='k', label='Measured RMS')
-        plt.scatter(data.wavelengths_lr, median_jitter_lr * 1e6, c='r', marker='x', label='Derived Jitter')
+        plt.scatter(data.wavelengths_lr, median_error_lr * 1e6, c='r', marker='x', label='Derived Jitter')
         plt.xlabel("Wavelength (μm)")
         plt.ylabel("Per Wavelength Noise (ppm)")
         plt.legend()
@@ -1368,6 +1390,7 @@ def main():
     
     model_run_args_hr['mu_duration'] = DURATION_BASE
     model_run_args_hr['mu_t0'] = T0_BASE
+    model_run_args_hr['mu_b'] = B_BASE
     model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
     model_run_args_hr['PERIOD'] = PERIOD_FIXED
     if detrend_type_multiwave == 'spot':
@@ -1375,7 +1398,6 @@ def main():
         model_run_args_hr['mu_spot_mu'] = SPOT_MU_BASE
         model_run_args_hr['mu_spot_sigma'] = SPOT_SIGMA_BASE
     init_params_hr = {
-        "logD": jnp.log(DURATION_BASE), "t0": T0_BASE, "_b": B_BASE,
         "depths": DEPTHS_BASE_HR,
         "u": U_mu_hr_init,
     }
@@ -1406,9 +1428,9 @@ def main():
         **model_run_args_hr 
     )
     map_params_hr = {
-        "duration": jnp.nanmedian(samples_hr["duration"]),
-        "t0": jnp.nanmedian(samples_hr["t0"]),
-        "b": jnp.nanmedian(samples_hr["b"]),
+        "duration": DURATION_BASE,
+        "t0": T0_BASE,
+        "b": B_BASE,
         "rors": jnp.nanmedian(samples_hr["rors"], axis=0),
         "period": PERIOD_FIXED
     }
@@ -1453,8 +1475,8 @@ def main():
 
     
     print("Plotting high-resolution fits and residuals...")
-    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['log_jitter']), axis=0)
-    plot_wavelength_offset_summary(time_hr, flux_hr, median_jitter_hr, data.wavelengths_hr,
+    median_error_hr = np.nanmedian(samples_hr['error'], axis=0)
+    plot_wavelength_offset_summary(time_hr, flux_hr, median_error_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
                                     detrend_type=detrend_type_multiwave)
@@ -1507,11 +1529,11 @@ def main():
         return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
-    median_jitter_hr = np.nanmedian(jnp.exp(samples_hr['log_jitter']), axis=0)
+    median_error_hr = np.nanmedian(samples_hr['error'], axis=0)
 
     plt.figure(figsize=(8,5))
     plt.scatter(wl_hr, rms_vals*1e6, c='k', label='Measured RMS')
-    plt.scatter(wl_hr, median_jitter_hr * 1e6, c='r', marker='x', label='Derived Jitter')
+    plt.scatter(wl_hr, median_error_hr * 1e6, c='r', marker='x', label='Derived Jitter')
     plt.xlabel("Wavelength (μm)")
     plt.ylabel("Per-Wavelength Noise (ppm)")
     plt.legend()
