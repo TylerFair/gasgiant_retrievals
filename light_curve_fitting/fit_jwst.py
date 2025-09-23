@@ -246,10 +246,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
         depths = numpyro.sample('depths', dist.Uniform(1e-5, 0.5).expand([num_lcs]))
         rors = numpyro.deterministic("rors", jnp.sqrt(depths))
+        yerr_per_lc = jnp.nanmedian(yerr, axis=1)
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-6), jnp.log(1)).expand([num_lcs]))
         jitter = jnp.exp(log_jitter)
-        jitter_broadcast = jitter[:,None] * jnp.ones_like(t)
-        error = numpyro.deterministic('error', jnp.sqrt(jitter_broadcast**2 + yerr**2))
+        #jitter_broadcast = jitter[:,None] * jnp.ones_like(t)
+        #error = numpyro.deterministic('error', jnp.sqrt(jitter_broadcast**2 + yerr**2))
+        total_error = numpyro.deterministic('total_error', jnp.sqrt(jitter**2 + yerr_per_lc**2))
+        error_broadcast = total_error[:, None] * jnp.ones_like(t)
         if ld_mode == 'free':
             u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
         elif ld_mode == 'fixed':
@@ -296,7 +299,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-        numpyro.sample('obs', dist.Normal(y_model, error), obs=y)
+        numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model_static
     
@@ -1223,8 +1226,10 @@ def main():
 
         
         print("Plotting low-resolution fits and residuals...")
-        median_error_lr = np.nanmedian(samples_lr['error'], axis=0)
-        plot_wavelength_offset_summary(time_lr, flux_lr, median_error_lr, data.wavelengths_lr,
+        #median_error_lr = np.nanmedian(samples_lr['error'], axis=0)
+        #plot_wavelength_offset_summary(time_lr, flux_lr, median_error_lr, data.wavelengths_lr,
+        median_total_error_lr = np.nanmedian(samples_lr['total_error'], axis=0)
+        plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
                                      detrend_type=detrend_type_multiwave)
@@ -1284,7 +1289,7 @@ def main():
 
         plt.figure(figsize=(8,5))
         plt.scatter(data.wavelengths_lr, rms_vals * 1e6, c='k', label='Measured RMS')
-        plt.scatter(data.wavelengths_lr, median_error_lr * 1e6, c='r', marker='x', label='Derived Jitter')
+        plt.scatter(data.wavelengths_lr, median_total_error_lr * 1e6, c='r', marker='x', label='Derived Total Error')
         plt.xlabel("Wavelength (μm)")
         plt.ylabel("Per Wavelength Noise (ppm)")
         plt.legend()
@@ -1475,8 +1480,8 @@ def main():
 
     
     print("Plotting high-resolution fits and residuals...")
-    median_error_hr = np.nanmedian(samples_hr['error'], axis=0)
-    plot_wavelength_offset_summary(time_hr, flux_hr, median_error_hr, data.wavelengths_hr,
+    median_total_error_hr = np.nanmedian(samples_hr['total_error'], axis=0)
+    plot_wavelength_offset_summary(time_hr, flux_hr, median_total_error_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
                                     detrend_type=detrend_type_multiwave)
@@ -1529,11 +1534,10 @@ def main():
         return jnp.nanmedian(jnp.abs(baseline - jnp.nanmedian(baseline))) * 1.4826
 
     rms_vals = jax.vmap(calc_rms)(flux_hr)
-    median_error_hr = np.nanmedian(samples_hr['error'], axis=0)
-
+    median_total_error_hr = np.nanmedian(samples_hr['total_error'], axis=0)
     plt.figure(figsize=(8,5))
     plt.scatter(wl_hr, rms_vals*1e6, c='k', label='Measured RMS')
-    plt.scatter(wl_hr, median_error_hr * 1e6, c='r', marker='x', label='Derived Jitter')
+    plt.scatter(wl_hr, median_total_error_hr * 1e6, c='r', marker='x', label='Derived Total Error')
     plt.xlabel("Wavelength (μm)")
     plt.ylabel("Per-Wavelength Noise (ppm)")
     plt.legend()
