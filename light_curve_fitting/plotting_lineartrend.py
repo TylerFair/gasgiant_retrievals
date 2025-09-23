@@ -143,7 +143,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
     print(jnp.shape(depth_median))
     depth_median, depth_lower, depth_upper = depth_median[0,:], depth_lower[0,:], depth_upper[0,:]
     print(jnp.shape(depth_median))
-
+    # Just plot the transmission spectrum
     plt.errorbar(wavelengths, depth_median*1e6, 
                     yerr=[depth_lower*1e6, depth_upper*1e6],
                     fmt='o', mfc='white', mec='r', ecolor='r')
@@ -156,13 +156,14 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 def plot_wavelength_offset_summary(
     t, indiv_y, jitter, wavelengths, map_params, transit_params,
     filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
-    align_residuals_to_model=True  
+    align_residuals_to_model=True  # keep True for vertical alignment to left panel
 ):
     import numpy as np
     import matplotlib.pyplot as plt
 
     num_lcs = indiv_y.shape[0]
 
+    # --- choose up to 10 curves across wavelength, sort by wavelength ---
     if num_lcs > 10:
         min_wl, max_wl = wavelengths.min(), wavelengths.max()
         target_wls = np.linspace(min_wl, max_wl, 10)
@@ -173,20 +174,24 @@ def plot_wavelength_offset_summary(
     indices = indices[np.argsort(wavelengths[indices])]
     selected_lcs = len(indices)
 
+    # --- time relative to t0 (hours like the paper) ---
     t0 = float(map_params["t0"])
     t_centered = (t - t0) * (24.0 if use_hours else 1.0)
     t_unit = "hours" if use_hours else "days"
 
+    # --- colors ---
     norm = plt.Normalize(wavelengths[indices].min(), wavelengths[indices].max())
     cmap = plt.cm.turbo
     colors = cmap(norm(wavelengths[indices]))
 
+    # --- depths & vertical spacing (your tighter step) ---
     depths = np.asarray(map_params['rors'])[indices]**2
     depth_med = float(np.nanmedian(depths))
     depth_max = float(np.nanmax(depths))
     step = 0.5 * depth_med
     offsets = np.arange(selected_lcs) * step
 
+    # --- figure: 2/3 model, 1/3 residuals ---
     fig, (ax1, ax2) = plt.subplots(
         1, 2,
         figsize=(12, 0.9 + 0.6 * selected_lcs),
@@ -200,11 +205,13 @@ def plot_wavelength_offset_summary(
         ax.tick_params(labelsize=9)
 
 
+    # --- per-curve plotting ---
     for i, idx in enumerate(indices):
         yoff = offsets[i]
         rors_i = float(map_params['rors'][idx])
         u_i = np.asarray(map_params['u'][idx])
 
+        # Transit model
         orbit = TransitOrbit(
             period=transit_params["period"],
             duration=float(map_params["duration"]),
@@ -214,6 +221,7 @@ def plot_wavelength_offset_summary(
         )
         model_transit = limb_dark_light_curve(orbit, u_i)(t)
 
+        # Detrend model
         if detrend_type != 'none':
             c_i = map_params['c'][idx]; v_i = map_params['v'][idx]
             t_shift = t - np.min(t)
@@ -233,6 +241,7 @@ def plot_wavelength_offset_summary(
         full_model = model_transit + trend
         resid = indiv_y[idx] - full_model
 
+        # --- Left: data + model (same color) ---
         ax1.scatter(t_centered, indiv_y[idx] - yoff, s=3, alpha=0.45,
                     color=colors[i], rasterized=True)
         ax1.plot(t_centered, full_model - yoff, '-', lw=1, color=colors[i])
@@ -243,24 +252,27 @@ def plot_wavelength_offset_summary(
             ha='left', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
         )
 
+        # --- Right: residuals ONLY ---
         baseline = 1.0 - yoff
-        y_res_plot = baseline + residual_scale * resid  
+        y_res_plot = baseline + residual_scale * resid   # <- no model added
         ax2.scatter(t_centered, y_res_plot, s=3, alpha=0.45,
                     color=colors[i], rasterized=True)
         ax2.axhline(baseline, color=colors[i], linestyle='--', lw=0.8, alpha=0.8)
         ax2.text(
             t_centered.min(), baseline + 0.15 * step,
-            f"Jitter: {jitter[idx]*1e6:.0f} ppm",
+            f"Error: {jitter[idx]*1e6:.0f} ppm",
             ha='right', va='bottom', color=colors[i], fontsize=12, fontweight='bold'
         )
 
 
+    # --- dynamic y-lims (LEFT): one depth above, one below lowest min ---
     y_top_left = 1.0 + depth_max * 0.15
     lowest_min_left = np.min(1.0 - offsets - depths)
     y_bot_left = lowest_min_left - depth_max * 0.1
     ax1.set_ylim(y_bot_left, y_top_left)
     
 
+    # labels & x-lims
     for ax in (ax1, ax2):
         ax.set_xlim(t_centered.min(), t_centered.max())
         ax.set_xlabel(f"time from transit center [{t_unit}]", fontsize=10)
