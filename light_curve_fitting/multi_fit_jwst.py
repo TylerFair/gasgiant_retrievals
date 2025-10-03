@@ -102,29 +102,33 @@ def spot_crossing(t, amp, mu, sigma):
     return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
 
 def _compute_transit_model(params, t):
-    """Transit Model for one or more planets."""
-    total_flux = jnp.zeros_like(t)
+    """Transit Model for one or more planets, using vmap for performance."""
 
-    # Handle case where planet params can be single values or lists
+    # Ensure all planet parameters are arrays
     periods = jnp.atleast_1d(params["period"])
     durations = jnp.atleast_1d(params["duration"])
     t0s = jnp.atleast_1d(params["t0"])
     bs = jnp.atleast_1d(params["b"])
     rorss = jnp.atleast_1d(params["rors"])
 
-    num_planets = len(periods)
-    for i in range(num_planets):
+    # Define a function to compute a single light curve
+    def get_lc(period, duration, t0, b, rors):
         orbit = TransitOrbit(
-            period=periods[i],
-            duration=durations[i],
-            time_transit=t0s[i],
-            impact_param=bs[i],
-            radius_ratio=rorss[i],
+            period=period,
+            duration=duration,
+            time_transit=t0,
+            impact_param=b,
+            radius_ratio=rors
         )
-        # 'u' are the limb darkening coefficients, which are for the star
-        # and should be the same for all planets at a given wavelength.
-        lc_model = limb_dark_light_curve(orbit, params["u"])(t)
-        total_flux += lc_model
+        # 'u' and 't' are the same for all planets
+        return limb_dark_light_curve(orbit, params["u"])(t)
+
+    # Vectorize the function over the planet parameters
+    batched_lcs = jax.vmap(get_lc)(periods, durations, t0s, bs, rorss)
+
+    # Sum the light curves and adjust for the baseline
+    total_flux = jnp.sum(batched_lcs, axis=0)
+    num_planets = len(periods)
 
     return total_flux - (num_planets - 1.0)
 def compute_lc_none(params, t):
