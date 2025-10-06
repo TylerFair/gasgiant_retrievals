@@ -89,7 +89,7 @@ def unpack_nirspec_eureka(file_pattern, nrs, planet_str, output_dir, bins_wanted
     return wavelengths, t, indiv_y, None
 
 
-def unpack_niriss_exoted(infile, order):    
+def unpack_niriss_exoted(infile, order, mask_integrations_start, mask_integrations_end):    
 
     bjd = fits.getdata(infile, 9)
     wave = fits.getdata(infile, 1 + 4 * (order - 1))
@@ -108,13 +108,15 @@ def unpack_niriss_exoted(infile, order):
 
     wavelength = wave
     wavelength_err = wave_err
+    
     t = np.array(bjd)
     fluxcube = np.array(fluxcube)
     fluxcube_err = np.array(fluxcube_err)
 
+    
     return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
-def unpack_nirspec_exoted(infile, instrument):    
+def unpack_nirspec_exoted(infile, instrument, mask_integrations_start, mask_integrations_end):    
 
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
@@ -138,7 +140,7 @@ def unpack_nirspec_exoted(infile, instrument):
     fluxcube_err = np.array(fluxcube_err)
     return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
 
-def unpack_miri_exoted(infile):
+def unpack_miri_exoted(infile, mask_integrations_start, mask_integrations_end):
 
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
