@@ -300,7 +300,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             "period": PERIOD, "duration": durations, "t0": t0s, "b": bs, "rors": rors, "u": u,
         }
 
-        in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": (0, None), "u": 0}
+        in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
         if detrend_type != 'none':
             if trend_mode == 'free':
                 params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1).expand([num_lcs]))
