@@ -131,7 +131,6 @@ def _compute_transit_model(params, t):
     num_planets = len(periods)
 
     return total_flux - (num_planets - 1.0)
-
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
@@ -853,59 +852,52 @@ def main():
 
             print(az.summary(inf_data, var_names=None, round_to=7))
 
-            # Separate shared and per-planet parameters
-            shared_params = {
+            bestfit_params_wl = {
+                'period': PERIOD_FIXED,
                 'u': jnp.nanmedian(wl_samples['u'], axis=0),
             }
-            if detrending_type != 'none':
-                shared_params['c'] = jnp.nanmedian(wl_samples['c'])
-                shared_params['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
-            if detrending_type == 'explinear':
-                shared_params['A'] = jnp.nanmedian(wl_samples['A'])
-                shared_params['tau'] = jnp.nanmedian(wl_samples['tau'])
-            if detrending_type == 'spot':
-                shared_params['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
-                shared_params['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
-                shared_params['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
-            elif detrending_type == 'gp':
-                shared_params['logs2'] = jnp.nanmedian(wl_samples['logs2'])
-                shared_params['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
-                shared_params['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
 
-            # Build a list of dictionaries, one for each planet
-            results_list = []
+            durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
+            durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
+
             for i in range(n_planets):
-                planet_params = {
-                    'planet_idx': i,
-                    'period': PERIOD_FIXED[i],
-                    'duration': jnp.nanmedian(wl_samples[f'duration_{i}']),
-                    't0': jnp.nanmedian(wl_samples[f't0_{i}']),
-                    'b': jnp.nanmedian(wl_samples[f'b_{i}']),
-                    'rors': jnp.nanmedian(wl_samples[f'rors_{i}']),
-                    'depths': jnp.nanmedian(wl_samples[f'rors_{i}'])**2,
-                    'duration_err': jnp.std(wl_samples[f'duration_{i}']),
-                    't0_err': jnp.std(wl_samples[f't0_{i}']),
-                    'b_err': jnp.std(wl_samples[f'b_{i}']),
-                    'rors_err': jnp.std(wl_samples[f'rors_{i}']),
-                    'depths_err': jnp.std(wl_samples[f'rors_{i}']**2),
-                    'u1': shared_params['u'][0],
-                    'u2': shared_params['u'][1],
-                }
-                # Add other shared params
-                planet_params.update({k: v for k, v in shared_params.items() if k != 'u'})
-                results_list.append(planet_params)
+                durations_fit.append(jnp.nanmedian(wl_samples[f'duration_{i}']))
+                t0s_fit.append(jnp.nanmedian(wl_samples[f't0_{i}']))
+                bs_fit.append(jnp.nanmedian(wl_samples[f'b_{i}']))
+                rors_fit.append(jnp.nanmedian(wl_samples[f'rors_{i}']))
 
-            # Create and save the DataFrame
-            bestfit_params_wl_df = pd.DataFrame(results_list)
-            bestfit_params_wl_df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
-            print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+                durations_err.append(jnp.std(wl_samples[f'duration_{i}']))
+                t0s_err.append(jnp.std(wl_samples[f't0_{i}']))
+                bs_err.append(jnp.std(wl_samples[f'b_{i}']))
+                rors_err.append(jnp.std(wl_samples[f'rors_{i}']))
+                depths_err.append(jnp.std(wl_samples[f'rors_{i}']**2))
 
-            # Reconstruct bestfit_params_wl for plotting
-            bestfit_params_wl = {key: bestfit_params_wl_df[key].values for key in bestfit_params_wl_df.columns if key not in ['planet_idx', 'u1', 'u2']}
-            bestfit_params_wl['u'] = np.array([bestfit_params_wl_df['u1'].values[0], bestfit_params_wl_df['u2'].values[0]])
-            for key in ['c', 'v', 'A', 'tau', 'spot_amp', 'spot_mu', 'spot_sigma', 'logs2', 'GP_log_sigma', 'GP_log_rho']:
-                if key in bestfit_params_wl:
-                    bestfit_params_wl[key] = bestfit_params_wl[key][0]
+            bestfit_params_wl['duration'] = jnp.array(durations_fit)
+            bestfit_params_wl['t0'] = jnp.array(t0s_fit)
+            bestfit_params_wl['b'] = jnp.array(bs_fit)
+            bestfit_params_wl['rors'] = jnp.array(rors_fit)
+            bestfit_params_wl['depths'] = jnp.array(rors_fit)**2
+
+            bestfit_params_wl['duration_err'] = jnp.array(durations_err)
+            bestfit_params_wl['t0_err'] = jnp.array(t0s_err)
+            bestfit_params_wl['b_err'] = jnp.array(bs_err)
+            bestfit_params_wl['rors_err'] = jnp.array(rors_err)
+            bestfit_params_wl['depths_err'] = jnp.array(depths_err)
+
+            if detrending_type != 'none':
+                bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
+                bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
+            if detrending_type == 'explinear':
+                bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
+                bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+            if detrending_type == 'spot':
+                bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
+                bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
+                bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
+            elif detrending_type == 'gp':
+                bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
+                bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
+                bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
 
 
             if detrending_type == 'linear':
@@ -1012,10 +1004,10 @@ def main():
                 df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
                 df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
 
-            #df = pd.DataFrame.from_dict({k: np.atleast_1d(v) for k, v in bestfit_params_wl.items()})
-            #df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
-            #print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-            #bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            df = pd.DataFrame.from_dict({k: np.atleast_1d(v) for k, v in bestfit_params_wl.items()})
+            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
+            print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
 
 
             DURATION_BASE = bestfit_params_wl_df['duration'].values
@@ -1126,13 +1118,13 @@ def main():
             "u": U_mu_lr,
             "depths": jnp.tile(DEPTH_BASE, (num_lcs_lr, 1))
         }
-        if detrending_type_multiwave != 'none':
+        if detrend_type_multiwave != 'none':
             init_params_lr['c'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['c'].values[0])
             init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0])
-        if detrending_type_multiwave == 'explinear':
+        if detrend_type_multiwave == 'explinear':
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['A'].values[0])
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['tau'].values[0])
-        if detrending_type_multiwave == 'spot':
+        if detrend_type_multiwave == 'spot':
             init_params_lr['spot_amp'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_amp'].values[0])
             init_params_lr['spot_mu'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_mu'].values[0])
             init_params_lr['spot_sigma'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_sigma'].values[0])
@@ -1180,7 +1172,7 @@ def main():
         )
 
         ld_u_lr = np.array(samples_lr["u"])
-        if detrending_type_multiwave != 'none':
+        if detrend_type_multiwave != 'none':
             trend_c_lr = np.array(samples_lr["c"])
             trend_v_lr = np.array(samples_lr["v"])
         if detrend_type_multiwave == 'explinear':
@@ -1441,11 +1433,11 @@ def main():
         c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
         v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
         trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr))
-        if detrending_type_multiwave == 'explinear':
+        if detrend_type_multiwave == 'explinear':
             A_interp_hr = np.polyval(best_poly_coeffs_A, wl_hr)
             tau_interp_hr = np.polyval(best_poly_coeffs_tau, wl_hr)
             trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr, A_interp_hr, tau_interp_hr))
-        if detrending_type_multiwave == 'spot':
+        if detrend_type_multiwave == 'spot':
             spot_amp_interp_hr = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
             spot_mu_interp_hr = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
             spot_sigma_interp_hr = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
@@ -1461,7 +1453,7 @@ def main():
     model_run_args_hr['mu_b'] = B_BASE
     model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
     model_run_args_hr['PERIOD'] = PERIOD_FIXED
-    if detrending_type_multiwave == 'spot':
+    if detrend_type_multiwave == 'spot':
         model_run_args_hr['mu_spot_amp'] = SPOT_AMP_BASE
         model_run_args_hr['mu_spot_mu'] = SPOT_MU_BASE
         model_run_args_hr['mu_spot_sigma'] = SPOT_SIGMA_BASE
@@ -1470,13 +1462,13 @@ def main():
         "u": U_mu_hr_init,
     }
     if hr_trend_mode == 'free':
-        if detrending_type_multiwave != 'none':
+        if detrend_type_multiwave != 'none':
             init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
             init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
-        if detrending_type_multiwave == 'explinear':
+        if detrend_type_multiwave == 'explinear':
             init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
             init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
-        if detrending_type_multiwave == 'spot':
+        if detrend_type_multiwave == 'spot':
             init_params_hr["spot_amp"] = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
             init_params_hr["spot_mu"] = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
             init_params_hr["spot_sigma"] = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
