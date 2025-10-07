@@ -490,6 +490,56 @@ def save_results(wavelengths, samples, csv_filename):
     print(f"Transmission spectroscopy data saved to {csv_filename}")
 
 
+def _prepare_params_for_df(params):
+    """
+    Restructures a dictionary of model parameters to be compatible with
+    pandas DataFrame creation, especially for multi-planet systems.
+
+    It identifies planet-specific vs. system-wide parameters and formats
+    the data into a list of dictionaries, where each dictionary is a row.
+    Limb-darkening params 'u' are split into 'u1' and 'u2'.
+    """
+    # Use 'period' to determine if it's a multi-planet fit.
+    period = params.get('period')
+    is_multi = isinstance(period, (list, np.ndarray)) and np.atleast_1d(period).shape[0] > 1
+    num_planets = np.atleast_1d(period).shape[0] if is_multi else 1
+
+    # Copy params to avoid modifying the original dict in place
+    params = params.copy()
+
+    # Unpack limb darkening params into separate columns
+    if 'u' in params:
+        u_val = params.pop('u')
+        if hasattr(u_val, '__len__') and len(u_val) == 2:
+            params['u1'] = u_val[0]
+            params['u2'] = u_val[1]
+
+    if not is_multi:
+        return [params]
+
+    # Multi-planet case: create a row for each planet
+    rows = []
+    # Identify keys for parameters that are defined per-planet
+    planet_specific_keys = [
+        k for k, v in params.items()
+        if isinstance(v, (list, np.ndarray)) and np.atleast_1d(v).shape[0] == num_planets
+    ]
+
+    # System-wide parameters are those not identified as planet-specific
+    system_wide_params = {
+        k: v for k, v in params.items()
+        if k not in planet_specific_keys
+    }
+
+    for i in range(num_planets):
+        row = system_wide_params.copy()
+        for key in planet_specific_keys:
+            row[key] = params[key][i]
+        rows.append(row)
+
+    return rows
+
+
 # ---------------------
 # Main Analysis
 # ---------------------
@@ -947,9 +997,9 @@ def main():
             #    bestfit_params_wl['GP_log_rho_err'] = jnp.std(wl_samples['GP_log_rho'], axis=0)
     
     
-            df = pd.DataFrame.from_dict(bestfit_params_wl, orient='index')
-            df = df.transpose()
-            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            prepared_params = _prepare_params_for_df(bestfit_params_wl)
+            df = pd.DataFrame(prepared_params)
+            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
             bestfit_params_wl = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
     
