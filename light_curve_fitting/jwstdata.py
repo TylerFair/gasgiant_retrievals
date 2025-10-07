@@ -203,9 +203,15 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
             flux_err_unbinned = flux_err_unbinned[~timemask, :]
             
     planet_cfg = cfg['planet']
-    prior_t0 = planet_cfg['t0']
-    prior_duration = planet_cfg['duration']
-    oot_mask = (time < prior_t0 - 0.6 * prior_duration) | (time > prior_t0 + 0.6 * prior_duration)
+    prior_t0s = np.atleast_1d(planet_cfg['t0'])
+    prior_durations = np.atleast_1d(planet_cfg['duration'])
+
+    # OOT mask should be true for times outside of ANY transit
+    in_transit_mask = np.zeros_like(time, dtype=bool)
+    for t0, duration in zip(prior_t0s, prior_durations):
+        in_transit_mask |= (time >= t0 - 0.6 * duration) & (time <= t0 + 0.6 * duration)
+
+    oot_mask = ~in_transit_mask
 
     # Do all the binning
     binned_data = bin_spectroscopy_data(

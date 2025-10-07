@@ -26,14 +26,29 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
         if detrend_type != 'none':
             c_i = map_params['c'][i]
             v_i = map_params['v'][i]
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=map_params["duration"],
-            impact_param=map_params["b"],
-            time_transit=map_params["t0"],
-            radius_ratio=rors_i,
-        )
-        model = limb_dark_light_curve(orbit, u_i)(t)
+
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        rors_i_all_planets = np.atleast_1d(rors_i)
+
+        num_planets = len(periods)
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model = total_model_flux - (num_planets - 1.0)
+
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
         elif detrend_type == 'explinear':
@@ -83,14 +98,28 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
             c_i = map_params['c'][i]
             v_i = map_params['v'][i]
         
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=map_params["duration"],
-            impact_param=map_params["b"],
-            time_transit=map_params["t0"],
-            radius_ratio=rors_i,
-        )
-        model = limb_dark_light_curve(orbit, u_i)(t)
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        rors_i_all_planets = np.atleast_1d(rors_i)
+
+        num_planets = len(periods)
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model = total_model_flux - (num_planets - 1.0)
+
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
         elif detrend_type == 'explinear':
@@ -126,29 +155,42 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
 
 def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
     """
-    Plot the transmission spectrum from MCMC results.
+    Plot the transmission spectrum from MCMC results. Handles multi-planet systems.
     
     Parameters:
     -----------
     wavelengths : array-like
-        The wavelengths at which the spectrum is measured
+        The wavelengths at which the spectrum is measured.
     rors_posterior : array-like
-        The posterior samples for rors (radius ratio)
+        The posterior samples for rors (radius ratio). Shape can be (n_samples, n_lcs) for
+        a single planet or (n_samples, n_lcs, n_planets) for multiple planets.
     """
-
     depth_chain = rors_posterior**2
-    depth_median = np.percentile(depth_chain, [50], axis=0)
-    depth_lower, depth_upper = depth_median - np.percentile(depth_chain, [16], axis=0), np.percentile(depth_chain, [84], axis=0) - depth_median
+
+    if depth_chain.ndim == 2:  # single planet case for backward compatibility
+        depth_chain = depth_chain[:, :, np.newaxis]
+
+    n_planets = depth_chain.shape[2]
+
     fig = plt.figure(figsize=(10, 8))
-    print(jnp.shape(depth_median))
-    depth_median, depth_lower, depth_upper = depth_median[0,:], depth_lower[0,:], depth_upper[0,:]
-    print(jnp.shape(depth_median))
-    # Just plot the transmission spectrum
-    plt.errorbar(wavelengths, depth_median*1e6, 
-                    yerr=[depth_lower*1e6, depth_upper*1e6],
-                    fmt='o', mfc='white', mec='r', ecolor='r')
+    colors = plt.cm.viridis(np.linspace(0, 1, n_planets))
+
+    for i in range(n_planets):
+        planet_depth_chain = depth_chain[:, :, i]
+        depth_median = np.percentile(planet_depth_chain, 50, axis=0)
+        depth_16 = np.percentile(planet_depth_chain, 16, axis=0)
+        depth_84 = np.percentile(planet_depth_chain, 84, axis=0)
+
+        y_err = [depth_median - depth_16, depth_84 - depth_median]
+
+        plt.errorbar(wavelengths, depth_median * 1e6,
+                     yerr=np.array(y_err) * 1e6,
+                     fmt='o', mfc='white', mec=colors[i], ecolor=colors[i], label=f'Planet {i + 1}')
+
     plt.xlabel("Wavelength (µm)")
     plt.ylabel("Depth (ppm)")
+    if n_planets > 1:
+        plt.legend()
     plt.savefig(filename, dpi=200)
 
     return fig
@@ -175,8 +217,8 @@ def plot_wavelength_offset_summary(
     selected_lcs = len(indices)
 
     # --- time relative to t0 (hours like the paper) ---
-    t0 = float(map_params["t0"])
-    t_centered = (t - t0) * (24.0 if use_hours else 1.0)
+    t0_ref = float(np.atleast_1d(map_params["t0"])[0]) # Center on first planet
+    t_centered = (t - t0_ref) * (24.0 if use_hours else 1.0)
     t_unit = "hours" if use_hours else "days"
 
     # --- colors ---
@@ -184,8 +226,11 @@ def plot_wavelength_offset_summary(
     cmap = plt.cm.turbo
     colors = cmap(norm(wavelengths[indices]))
 
-    # --- depths & vertical spacing (your tighter step) ---
-    depths = np.asarray(map_params['rors'])[indices]**2
+    # --- depths & vertical spacing ---
+    all_rors = np.asarray(map_params['rors'])[indices]
+    # Use first planet's depths for spacing if multi-planet
+    rors_for_spacing = all_rors if all_rors.ndim == 1 else all_rors[:, 0]
+    depths = rors_for_spacing**2
     depth_med = float(np.nanmedian(depths))
     depth_max = float(np.nanmax(depths))
     step = 0.5 * depth_med
@@ -208,18 +253,29 @@ def plot_wavelength_offset_summary(
     # --- per-curve plotting ---
     for i, idx in enumerate(indices):
         yoff = offsets[i]
-        rors_i = float(map_params['rors'][idx])
+        rors_i_all_planets = np.atleast_1d(map_params['rors'][idx])
         u_i = np.asarray(map_params['u'][idx])
 
-        # Transit model
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=float(map_params["duration"]),
-            impact_param=float(map_params["b"]),
-            time_transit=t0,
-            radius_ratio=rors_i,
-        )
-        model_transit = limb_dark_light_curve(orbit, u_i)(t)
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        num_planets = len(periods)
+
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model_transit = total_model_flux - (num_planets - 1.0)
 
         # Detrend model
         if detrend_type != 'none':
@@ -284,10 +340,7 @@ def plot_wavelength_offset_summary(
     plt.subplots_adjust(wspace=0.02)  # almost touching
     
     ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=False, prune=None))
-    #ax2.yaxis.set_ticks(ax1.get_yticks())
     
     plt.tight_layout()
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     return fig
-
-
