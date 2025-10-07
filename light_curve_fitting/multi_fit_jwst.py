@@ -131,7 +131,7 @@ def _compute_transit_model(params, t):
     num_planets = len(periods)
 
     # Return the sum of flux decrements (baseline 0)
-    return total_flux - num_planets
+    return total_flux 
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
