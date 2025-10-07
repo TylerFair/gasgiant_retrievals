@@ -130,7 +130,7 @@ def _compute_transit_model(params, t):
     total_flux = jnp.sum(batched_lcs, axis=0)
     num_planets = len(periods)
 
-    return total_flux - (num_planets - 1.0)
+    return total_flux 
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
