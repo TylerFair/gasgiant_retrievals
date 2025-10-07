@@ -504,10 +504,8 @@ def _prepare_params_for_df(params):
     is_multi = isinstance(period, (list, np.ndarray)) and np.atleast_1d(period).shape[0] > 1
     num_planets = np.atleast_1d(period).shape[0] if is_multi else 1
 
-    # Copy params to avoid modifying the original dict in place
     params = params.copy()
 
-    # Unpack limb darkening params into separate columns
     if 'u' in params:
         u_val = params.pop('u')
         if hasattr(u_val, '__len__') and len(u_val) == 2:
@@ -519,22 +517,28 @@ def _prepare_params_for_df(params):
 
     # Multi-planet case: create a row for each planet
     rows = []
-    # Identify keys for parameters that are defined per-planet
-    planet_specific_keys = [
-        k for k, v in params.items()
-        if isinstance(v, (list, np.ndarray)) and np.atleast_1d(v).shape[0] == num_planets
-    ]
 
-    # System-wide parameters are those not identified as planet-specific
-    system_wide_params = {
-        k: v for k, v in params.items()
-        if k not in planet_specific_keys
+    # Explicitly define which parameters are expected to be per-planet.
+    # This is more robust than guessing from array lengths.
+    known_planet_specific_keys = {
+        'period', 'duration', 't0', 'b', 'rors', 'depths',
+        'duration_err', 't0_err', 'b_err', 'rors_err', 'depths_err'
     }
+
+    system_wide_params = {}
+    planet_specific_params = {}
+
+    for k, v in params.items():
+        # A parameter is per-planet if it's in our known list AND it's a list/array of the correct length.
+        if k in known_planet_specific_keys and isinstance(v, (list, np.ndarray)) and len(v) == num_planets:
+            planet_specific_params[k] = v
+        else:
+            system_wide_params[k] = v
 
     for i in range(num_planets):
         row = system_wide_params.copy()
-        for key in planet_specific_keys:
-            row[key] = params[key][i]
+        for key, values in planet_specific_params.items():
+            row[key] = values[i]
         rows.append(row)
 
     return rows
