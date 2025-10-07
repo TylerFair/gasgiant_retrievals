@@ -130,8 +130,8 @@ def _compute_transit_model(params, t):
     total_flux = jnp.sum(batched_lcs, axis=0)
     num_planets = len(periods)
 
-    # Return the sum of flux decrements (baseline 0)
-    return total_flux 
+    return total_flux - (num_planets - 1.0)
+
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
@@ -901,8 +901,11 @@ def main():
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
 
             # Reconstruct bestfit_params_wl for plotting
-            bestfit_params_wl = {key: bestfit_params_wl_df[key].values for key in bestfit_params_wl_df.columns}
+            bestfit_params_wl = {key: bestfit_params_wl_df[key].values for key in bestfit_params_wl_df.columns if key not in ['planet_idx', 'u1', 'u2']}
             bestfit_params_wl['u'] = np.array([bestfit_params_wl_df['u1'].values[0], bestfit_params_wl_df['u2'].values[0]])
+            for key in ['c', 'v', 'A', 'tau', 'spot_amp', 'spot_mu', 'spot_sigma', 'logs2', 'GP_log_sigma', 'GP_log_rho']:
+                if key in bestfit_params_wl:
+                    bestfit_params_wl[key] = bestfit_params_wl[key][0]
 
 
             if detrending_type == 'linear':
@@ -1009,10 +1012,10 @@ def main():
                 df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
                 df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
 
-            df = pd.DataFrame.from_dict({k: np.atleast_1d(v) for k, v in bestfit_params_wl.items()})
-            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
-            print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-            bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            #df = pd.DataFrame.from_dict({k: np.atleast_1d(v) for k, v in bestfit_params_wl.items()})
+            #df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
+            #print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+            #bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
 
 
             DURATION_BASE = bestfit_params_wl_df['duration'].values
@@ -1123,13 +1126,13 @@ def main():
             "u": U_mu_lr,
             "depths": jnp.tile(DEPTH_BASE, (num_lcs_lr, 1))
         }
-        if detrend_type_multiwave != 'none':
+        if detrending_type_multiwave != 'none':
             init_params_lr['c'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['c'].values[0])
             init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0])
-        if detrend_type_multiwave == 'explinear':
+        if detrending_type_multiwave == 'explinear':
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['A'].values[0])
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['tau'].values[0])
-        if detrend_type_multiwave == 'spot':
+        if detrending_type_multiwave == 'spot':
             init_params_lr['spot_amp'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_amp'].values[0])
             init_params_lr['spot_mu'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_mu'].values[0])
             init_params_lr['spot_sigma'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['spot_sigma'].values[0])
@@ -1177,7 +1180,7 @@ def main():
         )
 
         ld_u_lr = np.array(samples_lr["u"])
-        if detrend_type_multiwave != 'none':
+        if detrending_type_multiwave != 'none':
             trend_c_lr = np.array(samples_lr["c"])
             trend_v_lr = np.array(samples_lr["v"])
         if detrend_type_multiwave == 'explinear':
@@ -1438,11 +1441,11 @@ def main():
         c_interp_hr = np.polyval(best_poly_coeffs_c, wl_hr)
         v_interp_hr = np.polyval(best_poly_coeffs_v, wl_hr)
         trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr))
-        if detrend_type_multiwave == 'explinear':
+        if detrending_type_multiwave == 'explinear':
             A_interp_hr = np.polyval(best_poly_coeffs_A, wl_hr)
             tau_interp_hr = np.polyval(best_poly_coeffs_tau, wl_hr)
             trend_fixed_hr = np.column_stack((c_interp_hr, v_interp_hr, A_interp_hr, tau_interp_hr))
-        if detrend_type_multiwave == 'spot':
+        if detrending_type_multiwave == 'spot':
             spot_amp_interp_hr = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
             spot_mu_interp_hr = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
             spot_sigma_interp_hr = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
@@ -1458,7 +1461,7 @@ def main():
     model_run_args_hr['mu_b'] = B_BASE
     model_run_args_hr['mu_depths'] = DEPTHS_BASE_HR
     model_run_args_hr['PERIOD'] = PERIOD_FIXED
-    if detrend_type_multiwave == 'spot':
+    if detrending_type_multiwave == 'spot':
         model_run_args_hr['mu_spot_amp'] = SPOT_AMP_BASE
         model_run_args_hr['mu_spot_mu'] = SPOT_MU_BASE
         model_run_args_hr['mu_spot_sigma'] = SPOT_SIGMA_BASE
@@ -1467,13 +1470,13 @@ def main():
         "u": U_mu_hr_init,
     }
     if hr_trend_mode == 'free':
-        if detrend_type_multiwave != 'none':
+        if detrending_type_multiwave != 'none':
             init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
             init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
-        if detrend_type_multiwave == 'explinear':
+        if detrending_type_multiwave == 'explinear':
             init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
             init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
-        if detrend_type_multiwave == 'spot':
+        if detrending_type_multiwave == 'spot':
             init_params_hr["spot_amp"] = np.polyval(best_poly_coeffs_spot_amp, wl_hr)
             init_params_hr["spot_mu"] = np.polyval(best_poly_coeffs_spot_mu, wl_hr)
             init_params_hr["spot_sigma"] = np.polyval(best_poly_coeffs_spot_sigma, wl_hr)
