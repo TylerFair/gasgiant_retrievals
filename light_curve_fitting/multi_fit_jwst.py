@@ -130,7 +130,8 @@ def _compute_transit_model(params, t):
     total_flux = jnp.sum(batched_lcs, axis=0)
     num_planets = len(periods)
 
-    return total_flux - (num_planets - 1.0)
+    # Return the sum of flux decrements (baseline 0)
+    return total_flux - num_planets
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
@@ -852,52 +853,56 @@ def main():
 
             print(az.summary(inf_data, var_names=None, round_to=7))
 
-            bestfit_params_wl = {
-                'period': PERIOD_FIXED,
+            # Separate shared and per-planet parameters
+            shared_params = {
                 'u': jnp.nanmedian(wl_samples['u'], axis=0),
             }
-
-            durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
-            durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
-
-            for i in range(n_planets):
-                durations_fit.append(jnp.nanmedian(wl_samples[f'duration_{i}']))
-                t0s_fit.append(jnp.nanmedian(wl_samples[f't0_{i}']))
-                bs_fit.append(jnp.nanmedian(wl_samples[f'b_{i}']))
-                rors_fit.append(jnp.nanmedian(wl_samples[f'rors_{i}']))
-
-                durations_err.append(jnp.std(wl_samples[f'duration_{i}']))
-                t0s_err.append(jnp.std(wl_samples[f't0_{i}']))
-                bs_err.append(jnp.std(wl_samples[f'b_{i}']))
-                rors_err.append(jnp.std(wl_samples[f'rors_{i}']))
-                depths_err.append(jnp.std(wl_samples[f'rors_{i}']**2))
-
-            bestfit_params_wl['duration'] = jnp.array(durations_fit)
-            bestfit_params_wl['t0'] = jnp.array(t0s_fit)
-            bestfit_params_wl['b'] = jnp.array(bs_fit)
-            bestfit_params_wl['rors'] = jnp.array(rors_fit)
-            bestfit_params_wl['depths'] = jnp.array(rors_fit)**2
-
-            bestfit_params_wl['duration_err'] = jnp.array(durations_err)
-            bestfit_params_wl['t0_err'] = jnp.array(t0s_err)
-            bestfit_params_wl['b_err'] = jnp.array(bs_err)
-            bestfit_params_wl['rors_err'] = jnp.array(rors_err)
-            bestfit_params_wl['depths_err'] = jnp.array(depths_err)
-
             if detrending_type != 'none':
-                bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
-                bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
+                shared_params['c'] = jnp.nanmedian(wl_samples['c'])
+                shared_params['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
             if detrending_type == 'explinear':
-                bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
-                bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+                shared_params['A'] = jnp.nanmedian(wl_samples['A'])
+                shared_params['tau'] = jnp.nanmedian(wl_samples['tau'])
             if detrending_type == 'spot':
-                bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
-                bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
-                bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
+                shared_params['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
+                shared_params['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
+                shared_params['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
             elif detrending_type == 'gp':
-                bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
-                bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
-                bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
+                shared_params['logs2'] = jnp.nanmedian(wl_samples['logs2'])
+                shared_params['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
+                shared_params['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
+
+            # Build a list of dictionaries, one for each planet
+            results_list = []
+            for i in range(n_planets):
+                planet_params = {
+                    'planet_idx': i,
+                    'period': PERIOD_FIXED[i],
+                    'duration': jnp.nanmedian(wl_samples[f'duration_{i}']),
+                    't0': jnp.nanmedian(wl_samples[f't0_{i}']),
+                    'b': jnp.nanmedian(wl_samples[f'b_{i}']),
+                    'rors': jnp.nanmedian(wl_samples[f'rors_{i}']),
+                    'depths': jnp.nanmedian(wl_samples[f'rors_{i}'])**2,
+                    'duration_err': jnp.std(wl_samples[f'duration_{i}']),
+                    't0_err': jnp.std(wl_samples[f't0_{i}']),
+                    'b_err': jnp.std(wl_samples[f'b_{i}']),
+                    'rors_err': jnp.std(wl_samples[f'rors_{i}']),
+                    'depths_err': jnp.std(wl_samples[f'rors_{i}']**2),
+                    'u1': shared_params['u'][0],
+                    'u2': shared_params['u'][1],
+                }
+                # Add other shared params
+                planet_params.update({k: v for k, v in shared_params.items() if k != 'u'})
+                results_list.append(planet_params)
+
+            # Create and save the DataFrame
+            bestfit_params_wl_df = pd.DataFrame(results_list)
+            bestfit_params_wl_df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
+            print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+
+            # Reconstruct bestfit_params_wl for plotting
+            bestfit_params_wl = {key: bestfit_params_wl_df[key].values for key in bestfit_params_wl_df.columns}
+            bestfit_params_wl['u'] = np.array([bestfit_params_wl_df['u1'].values[0], bestfit_params_wl_df['u2'].values[0]])
 
 
             if detrending_type == 'linear':
