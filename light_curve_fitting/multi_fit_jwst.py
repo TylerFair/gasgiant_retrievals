@@ -933,7 +933,7 @@ def main():
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
 
             median_error_wl = np.nanmedian(wl_samples['error'])
-            plt.plot(data.wl_time, wl_transit_model, color="r", lw=2)
+            plt.plot(data.wl_time, wl_transit_model, color="r", lw=2, zorder=3)
             plt.errorbar(data.wl_time, data.wl_flux, yerr=median_error_wl, fmt='.', c='k', ms=1)
 
            # plt.title('WL GP fit')
