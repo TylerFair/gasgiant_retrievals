@@ -1372,7 +1372,7 @@ def main():
 
         print("Plotting and saving lowres transmission spectrum...")
         plot_transmission_spectrum(wl_lr, samples_lr["rors"],
-                            f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum.png")
+                            f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
 
         #oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)    
@@ -1590,7 +1590,7 @@ def main():
 
     print("Plotting and saving final transmission spectrum...")
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
-                            f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum.png")
+                            f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
 
     if "u" in samples_hr:
