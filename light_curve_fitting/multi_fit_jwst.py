@@ -128,9 +128,9 @@ def _compute_transit_model(params, t):
 
     # Sum the light curves and adjust for the baseline
     total_flux = jnp.sum(batched_lcs, axis=0)
-    num_planets = len(periods)
 
     return total_flux 
+    
 def compute_lc_none(params, t):
     """Computes transit with no detrending."""
     return _compute_transit_model(params, t) + 1.0
@@ -355,10 +355,10 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
             model,
             regularize_mass_matrix=False,
             init_strategy=numpyro.infer.init_to_value(values=init_params),
-            target_accept_prob=0.99
+            target_accept_prob=0.9
         ),
-        num_warmup=3000,
-        num_samples=3000,
+        num_warmup=1000,
+        num_samples=1000,
         progress_bar=True,
         jit_model_args=True
     )
@@ -1334,7 +1334,12 @@ def main():
                             f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum.png")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
 
-        oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)
+        #oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)    
+        in_transit_mask = jnp.zeros_like(time_lr, dtype=bool)
+        for t0, duration in zip(T0_BASE, DURATION_BASE):
+            in_transit_mask |= (time_lr >= t0 - 0.6 * duration) & (time_lr <= t0 + 0.6 * duration)
+    
+        oot_mask_lr = ~in_transit_mask
 
         def calc_rms(y_bin):
             baseline = y_bin[oot_mask_lr]
@@ -1583,7 +1588,12 @@ def main():
     else:
         print("LD coefficients were fixed—skipping u₁–u₂ plots.")
 
-    oot_mask = (time_hr < T0_BASE - 0.6 * DURATION_BASE) | (time_hr > T0_BASE + 0.6 * DURATION_BASE)
+   # oot_mask = (time_hr < T0_BASE - 0.6 * DURATION_BASE) | (time_hr > T0_BASE + 0.6 * DURATION_BASE)
+    in_transit_mask = jnp.zeros_like(time_hr, dtype=bool)
+    for t0, duration in zip(T0_BASE, DURATION_BASE):
+        in_transit_mask |= (time_hr >= t0 - 0.6 * duration) & (time_hr <= t0 + 0.6 * duration)
+    
+    oot_mask_hr = ~in_transit_mask
 
     def calc_rms(y_bin):
         baseline = y_bin[oot_mask]
