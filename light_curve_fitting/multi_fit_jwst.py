@@ -1436,7 +1436,7 @@ df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', i
     num_lcs_hr = flux_err_hr.shape[0]
     print(f"High-res: {num_lcs_hr} light curves.")
 
-    DEPTHS_BASE_HR = jnp.full(num_lcs_hr, DEPTH_BASE)
+    DEPTHS_BASE_HR = jnp.tile(DEPTH_BASE, (num_lcs_hr, 1))
     hr_ld_mode = 'free'
     if flags.get('interpolate_ld', False):
         hr_ld_mode = 'interpolated'
