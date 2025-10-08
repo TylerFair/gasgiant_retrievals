@@ -1399,7 +1399,7 @@ df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', i
         plt.savefig(f'{output_dir}/24_{instrument_full_str}_{lr_bin_str}_rms.png')
         plt.close()
     # --- High-resolution Analysis ---
-    print(f"\n--- Running High-Resolution Analysis (Binned to {lr_bin_str}) ---")
+    print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
 
     ##### APPLY OUTLIER MASK HERE ####
     time_hr = jnp.array(data.time[~wl_mad_mask])
