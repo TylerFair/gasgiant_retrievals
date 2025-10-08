@@ -47,7 +47,7 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
             planet_model = limb_dark_light_curve(orbit, u_i)(t)
             total_model_flux += planet_model
 
-        model = total_model_flux - (num_planets - 1.0)
+        model = total_model_flux 
 
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
@@ -118,8 +118,7 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
             planet_model = limb_dark_light_curve(orbit, u_i)(t)
             total_model_flux += planet_model
 
-        model = total_model_flux - (num_planets - 1.0)
-
+        model = total_model_flux 
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
         elif detrend_type == 'explinear':
@@ -176,6 +175,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
     colors = plt.cm.viridis(np.linspace(0, 1, n_planets))
 
     for i in range(n_planets):
+        plt.figure()
         planet_depth_chain = depth_chain[:, :, i]
         depth_median = np.percentile(planet_depth_chain, 50, axis=0)
         depth_16 = np.percentile(planet_depth_chain, 16, axis=0)
@@ -185,14 +185,12 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 
         plt.errorbar(wavelengths, depth_median * 1e6,
                      yerr=np.array(y_err) * 1e6,
-                     fmt='o', mfc='white', mec=colors[i], ecolor=colors[i], label=f'Planet {i + 1}')
+                     fmt='o', mfc='k', mec='k', ecolor='k', label=f'Planet {i + 1}')
 
-    plt.xlabel("Wavelength (µm)")
-    plt.ylabel("Depth (ppm)")
-    if n_planets > 1:
-        plt.legend()
-    plt.savefig(filename, dpi=200)
-
+        plt.xlabel("Wavelength (µm)")
+        plt.ylabel("Depth (ppm)")
+        plt.savefig(os.path.join(filename, f'_0{i}'), dpi=200)
+        plt.close()
     return fig
 
 def plot_wavelength_offset_summary(
@@ -275,7 +273,7 @@ def plot_wavelength_offset_summary(
             planet_model = limb_dark_light_curve(orbit, u_i)(t)
             total_model_flux += planet_model
 
-        model_transit = total_model_flux - (num_planets - 1.0)
+        model_transit = total_model_flux
 
         # Detrend model
         if detrend_type != 'none':
