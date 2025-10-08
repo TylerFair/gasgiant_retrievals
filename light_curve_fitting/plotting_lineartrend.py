@@ -189,7 +189,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 
         plt.xlabel("Wavelength (µm)")
         plt.ylabel("Depth (ppm)")
-        plt.savefig(os.path.join(filename, f'_0{i}'), dpi=200)
+        plt.savefig(filename+f'_0{i}', dpi=200)
         plt.close()
     return fig
 
