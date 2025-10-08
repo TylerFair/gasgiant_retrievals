@@ -1003,9 +1003,50 @@ def main():
             if detrending_type == 'gp':
                 df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
                 df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
+    
+    rows = []
+    for i in range(n_planets):
+        row = {
+            'planet_id': i,
+            'period': bestfit_params_wl['period'][i],
+            'duration': bestfit_params_wl['duration'][i],
+            't0': bestfit_params_wl['t0'][i],
+            'b': bestfit_params_wl['b'][i],
+            'rors': bestfit_params_wl['rors'][i],
+            'depths': bestfit_params_wl['depths'][i],
+            'duration_err': bestfit_params_wl['duration_err'][i],
+            't0_err': bestfit_params_wl['t0_err'][i],
+            'b_err': bestfit_params_wl['b_err'][i],
+            'rors_err': bestfit_params_wl['rors_err'][i],
+            'depths_err': bestfit_params_wl['depths_err'][i],
+        }
+        
+        # Add scalar parameters (same for all planets)
+        if detrending_type != 'none':
+            row['c'] = bestfit_params_wl['c']
+            row['v'] = bestfit_params_wl['v']
+        
+        # Add LD coefficients
+        row['u1'] = bestfit_params_wl['u'][0]
+        row['u2'] = bestfit_params_wl['u'][1]
+        
+        # Add other detrending parameters if present
+        if detrending_type == 'explinear':
+            row['A'] = bestfit_params_wl['A']
+            row['tau'] = bestfit_params_wl['tau']
+        elif detrending_type == 'spot':
+            row['spot_amp'] = bestfit_params_wl['spot_amp']
+            row['spot_mu'] = bestfit_params_wl['spot_mu']
+            row['spot_sigma'] = bestfit_params_wl['spot_sigma']
+        elif detrending_type == 'gp':
+            row['logs2'] = bestfit_params_wl['logs2']
+            row['GP_log_sigma'] = bestfit_params_wl['GP_log_sigma']
+            row['GP_log_rho'] = bestfit_params_wl['GP_log_rho']
+        
+        rows.append(row)
 
-            df = pd.DataFrame.from_dict({k: np.atleast_1d(v) for k, v in bestfit_params_wl.items()})
-            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
+df = pd.DataFrame(rows)
+df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
             bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
 
