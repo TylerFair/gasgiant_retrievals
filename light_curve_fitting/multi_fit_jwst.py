@@ -512,18 +512,40 @@ def plot_poly_fit(x, y, coeffs, order, xlabel, ylabel, title, save_path):
     print(f"Saved polynomial fit plot to {save_path}")
 
 def save_results(wavelengths, samples, csv_filename):
-    """Computes and saves transmission spectrum results to CSV."""
+    """Computes and saves transmission spectrum results to CSV for multi-planet fits."""
     depth_chain = samples['rors']**2
+
+    # (n_samples, n_lcs, n_planets) -> (n_lcs, n_planets)
     depth_median = np.nanmedian(depth_chain, axis=0)
     depth_err = np.std(depth_chain, axis=0)
 
-    output_data = np.column_stack((wavelengths, depth_median, depth_err))
+    if depth_median.ndim == 1:
+        # This case might occur if n_planets=1 and the last dim is squeezed.
+        depth_median = depth_median[:, np.newaxis]
+        depth_err = depth_err[:, np.newaxis]
+
+    n_planets = depth_median.shape[1]
+
+    # Prepare header
+    header_cols = ["wavelength"]
+    for i in range(n_planets):
+        header_cols.append(f"depth{i:02d}")
+        header_cols.append(f"depth_err{i:02d}")
+    header = ",".join(header_cols)
+
+    # Prepare data columns
+    output_cols = [wavelengths]
+    for i in range(n_planets):
+        output_cols.append(depth_median[:, i])
+        output_cols.append(depth_err[:, i])
+
+    output_data = np.column_stack(output_cols)
+
     np.savetxt(
         csv_filename, output_data, delimiter=",",
-        header="wavelength,depth,depth_err", comments=""
+        header=header, comments=""
     )
     print(f"Transmission spectroscopy data saved to {csv_filename}")
-
 
 # ---------------------
 # Main Analysis
