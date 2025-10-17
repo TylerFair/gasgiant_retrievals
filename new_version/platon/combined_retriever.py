@@ -59,25 +59,6 @@ class CombinedRetriever:
             
         return line
     
-    def _precompute_gas_absorption(self, fit_info, transit_calc):
-        # Only pre-compute if all abundance parameters are fixed
-        if (fit_info.all_params["logZ"] is not None and "logZ" not in fit_info.fit_param_names and
-                fit_info.all_params["CO_ratio"] is not None and "CO_ratio" not in fit_info.fit_param_names and
-                "log_CH4_mult" not in fit_info.fit_param_names and
-                not fit_info.all_params["fit_vmr"].best_guess and
-                not fit_info.all_params["fit_clr"].best_guess):
-
-            logZ = fit_info.all_params["logZ"].best_guess
-            CO_ratio = fit_info.all_params["CO_ratio"].best_guess
-            CH4_mult = 10.**fit_info.all_params["log_CH4_mult"].best_guess
-            
-            abundances = transit_calc.atm._get_abundances_array(logZ, CO_ratio, CH4_mult, None, None, None)
-            
-            gas_absorption_contrib = transit_calc.atm._get_gas_absorption(abundances, transit_calc.atm.T_grid, transit_calc.atm.P_grid)
-            return gas_absorption_contrib, gas_absorption_contrib  # clear, cloudy
-        else:
-            return None, None
-            
     def _validate_params(self, fit_info, calculator):
         # This assumes that the valid parameter space is rectangular, so that
         # the bounds for each parameter can be treated separately. Unfortunately
@@ -130,9 +111,7 @@ class CombinedRetriever:
                  measured_transit_errors, measured_eclipse_depths,
                  measured_eclipse_errors, ret_best_fit=False,
                  lnlike_per_point=False,
-                 zero_opacities=[],
-                 gas_absorption_contrib_clear=None,
-                 gas_absorption_contrib_cloudy=None):
+                 zero_opacities=[]):
 
         if not fit_info._within_limits(params):
             return -np.inf
@@ -206,8 +185,7 @@ class CombinedRetriever:
                         cloudtop_pressure=cloudtop_P, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                         frac_scale_height=frac_scale_height, number_density=number_density,
-                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities,
-                        gas_absorption_contrib=gas_absorption_contrib_cloudy)
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     transit_wavelengths, calculated_transit_depths_clear, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
                         custom_abundances=None,
@@ -215,8 +193,7 @@ class CombinedRetriever:
                         cloudtop_pressure=np.inf, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                         frac_scale_height=frac_scale_height, number_density=0,
-                        part_size=part_size, ri=None, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities,
-                        gas_absorption_contrib=gas_absorption_contrib_clear)
+                        part_size=part_size, ri=None, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     calculated_transit_depths = cloud_cov_frac * calculated_transit_depths_cloudy + (1 - cloud_cov_frac) * calculated_transit_depths_clear
                 else:
                     transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
@@ -226,8 +203,7 @@ class CombinedRetriever:
                         cloudtop_pressure=cloudtop_P, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                         frac_scale_height=frac_scale_height, number_density=number_density,
-                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities,
-                        gas_absorption_contrib=gas_absorption_contrib_cloudy)
+                        part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     
                 calculated_transit_depths[params_dict["offset_start"] : params_dict["offset_end"]] += params_dict["offset_transit"]
                 residuals = calculated_transit_depths - measured_transit_depths
@@ -272,15 +248,11 @@ class CombinedRetriever:
 
     def _ln_prob(self, params, transit_calc, eclipse_calc, fit_info, measured_transit_depths,
                  measured_transit_errors, measured_eclipse_depths,
-                 measured_eclipse_errors, zero_opacities=[],
-                 gas_absorption_contrib_clear=None,
-                 gas_absorption_contrib_cloudy=None):
+                 measured_eclipse_errors, zero_opacities=[]):
         
         lnlike_per_point = self._ln_like(params, transit_calc, eclipse_calc, fit_info, measured_transit_depths,
                                 measured_transit_errors, measured_eclipse_depths,
-                                measured_eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True,
-                                gas_absorption_contrib_clear=gas_absorption_contrib_clear,
-                                gas_absorption_contrib_cloudy=gas_absorption_contrib_cloudy)
+                                measured_eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True)
         
         if not np.isscalar(lnlike_per_point):
             ln_like = lnlike_per_point.sum()
@@ -352,13 +324,10 @@ class CombinedRetriever:
                 include_condensation=include_condensation, method=rad_method)
             eclipse_calc.change_wavelength_bins(eclipse_bins)       
 
-        gas_absorption_contrib_clear, gas_absorption_contrib_cloudy = self._precompute_gas_absorption(fit_info, transit_calc)
-            
         sampler = emcee.EnsembleSampler(
             nwalkers, fit_info._get_num_fit_params(), self._ln_prob,
             args=(transit_calc, eclipse_calc, fit_info, transit_depths, transit_errors,
-                                 eclipse_depths, eclipse_errors, zero_opacities,
-                                 gas_absorption_contrib_clear, gas_absorption_contrib_cloudy))
+                                 eclipse_depths, eclipse_errors, zero_opacities))
 
         for i, result in enumerate(sampler.sample(
                 initial_positions, iterations=nsteps)):
@@ -508,13 +477,9 @@ class CombinedRetriever:
                 new_cube[i] = fit_info._from_unit_interval(i, cube[i])
             return new_cube
 
-        gas_absorption_contrib_clear, gas_absorption_contrib_cloudy = self._precompute_gas_absorption(fit_info, transit_calc)
-
         def dynesty_ln_like(cube):
             lnlike_per_point = self._ln_like(cube, transit_calc, eclipse_calc, fit_info, transit_depths, transit_errors,
-                                    eclipse_depths, eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True,
-                                    gas_absorption_contrib_clear=gas_absorption_contrib_clear,
-                                    gas_absorption_contrib_cloudy=gas_absorption_contrib_cloudy)
+                                    eclipse_depths, eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True)
             if not np.isscalar(lnlike_per_point):
                 ln_like = lnlike_per_point.sum()
             else:
@@ -611,13 +576,9 @@ class CombinedRetriever:
                 new_cube[i] = fit_info._from_unit_interval(i, cube[i])
             return new_cube
 
-        gas_absorption_contrib_clear, gas_absorption_contrib_cloudy = self._precompute_gas_absorption(fit_info, transit_calc)
-        
         def multinest_ln_like(cube):
             lnlike_per_point = self._ln_like(cube, transit_calc, eclipse_calc, fit_info, transit_depths, transit_errors,
-                                    eclipse_depths, eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True,
-                                    gas_absorption_contrib_clear=gas_absorption_contrib_clear,
-                                    gas_absorption_contrib_cloudy=gas_absorption_contrib_cloudy)
+                                    eclipse_depths, eclipse_errors, zero_opacities=zero_opacities, lnlike_per_point=True)
             if not np.isscalar(lnlike_per_point):
                 ln_like = lnlike_per_point.sum()
             else:
