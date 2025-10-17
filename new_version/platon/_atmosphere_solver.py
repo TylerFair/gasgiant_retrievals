@@ -399,6 +399,21 @@ class AtmosphereSolver:
         correction_factors = unspotted_spectrum/stellar_spectrum
         return stellar_spectrum, correction_factors
 
+    def _get_common_absorption(self, abundances, P_profile, T_profile, P_cond, T_cond,
+                               add_gas_absorption=True,
+                               add_H_minus_absorption=False,
+                               add_collisional_absorption=True,
+                               zero_opacities=[]):
+        absorption_coeff = xp.zeros((int(xp.sum(T_cond)), int(xp.sum(P_cond)), len(self.lambda_grid)))
+        if add_gas_absorption:
+            absorption_coeff += self._get_gas_absorption(abundances, P_cond, T_cond, zero_opacities=zero_opacities)
+        if add_H_minus_absorption:
+            absorption_coeff += self._get_H_minus_absorption(abundances, P_cond, T_cond)
+        if add_collisional_absorption:
+            absorption_coeff += self._get_collisional_absorption(
+                abundances, P_cond, T_cond)
+        return absorption_coeff
+
     def compute_params(self, star_radius, planet_mass, planet_radius,
                        P_profile, T_profile,
                        logZ=0, CO_ratio=0.53, CH4_mult=1,
@@ -413,9 +428,10 @@ class AtmosphereSolver:
                        ri=None, frac_scale_height=1, number_density=0,
                        part_size=1e-6, part_size_std=0.5,
                        P_quench=1e-99,
-                       min_abundance=1e-99, min_cross_sec=1e-99, zero_opacities=[]):
+                       min_abundance=1e-99, min_cross_sec=1e-99, zero_opacities=[],
+                       common_absorption_coeff=None):
         self._validate_params(T_profile, logZ, CO_ratio, cloudtop_pressure)
-       
+
         abundances = self._get_abundances_array(
             logZ, CO_ratio, CH4_mult, custom_abundances, gases, vmrs)
 
@@ -431,7 +447,7 @@ class AtmosphereSolver:
         radii, dr, atm_abundances, mu_profile = self._get_above_cloud_profiles(
             P_profile, T_profile, abundances, planet_mass, planet_radius,
             star_radius, above_clouds, T_star)
-            
+
         P_profile = P_profile[above_clouds]
         T_profile = T_profile[above_clouds]
 
@@ -439,46 +455,44 @@ class AtmosphereSolver:
         P_cond = _interpolator_3D.get_condition_array(
             P_profile, self.P_grid, cloudtop_pressure)
 
-        absorption_coeff = xp.zeros((int(xp.sum(T_cond)), int(xp.sum(P_cond)), len(self.lambda_grid)))
-        if add_gas_absorption:
-            absorption_coeff += self._get_gas_absorption(abundances, P_cond, T_cond, zero_opacities=zero_opacities)
-        if add_H_minus_absorption:
-            absorption_coeff += self._get_H_minus_absorption(abundances, P_cond, T_cond)
+        if common_absorption_coeff is None:
+            absorption_coeff = self._get_common_absorption(abundances, P_profile, T_profile, P_cond, T_cond,
+                                                           add_gas_absorption, add_H_minus_absorption,
+                                                           add_collisional_absorption, zero_opacities)
+        else:
+            absorption_coeff = common_absorption_coeff
+
         if add_scattering:
             if ri is not None:
                 if scattering_factor != 1 or scattering_slope != 4:
                     raise ValueError("Cannot use both parametric and Mie scattering at the same time")
-                
+
                 absorption_coeff += self._get_mie_scattering_absorption(
                     P_cond, T_cond, ri, part_size,
                     frac_scale_height, number_density, sigma=part_size_std)
                 absorption_coeff += self._get_scattering_absorption(
                     abundances, P_cond, T_cond)
-                
+
             else:
                 absorption_coeff += self._get_scattering_absorption(abundances,
                 P_cond, T_cond, scattering_factor, scattering_slope,
                 scattering_ref_wavelength)
 
-        if add_collisional_absorption:
-            absorption_coeff += self._get_collisional_absorption(
-                abundances, P_cond, T_cond)
-
         # Cross sections vary less than absorption coefficients by pressure
         # and temperature, so interpolation should be done with cross sections
         cross_secs = absorption_coeff / (self.P_grid[P_cond][xp.newaxis, :, xp.newaxis] / k_B / self.T_grid[T_cond][:, xp.newaxis, xp.newaxis])
         cross_secs[cross_secs < min_cross_sec] = min_cross_sec
-        
+
         if len(self.T_grid[T_cond]) == 1:
             cross_secs_atm = xp.exp(interp1d(xp.log(P_profile), xp.log(self.P_grid[P_cond]), xp.log(cross_secs[0])))
-        else:            
+        else:
             ln_cross = regular_grid_interp(
                 1.0/self.T_grid[T_cond][::-1],
                 xp.log(self.P_grid[P_cond]),
                 xp.log(cross_secs[::-1]),
                 1.0 / T_profile,
                 xp.log(P_profile))
-         
+
             cross_secs_atm = xp.exp(ln_cross)
 
         absorption_coeff_atm = cross_secs_atm * (P_profile / k_B / T_profile)[:, xp.newaxis]
@@ -488,6 +502,7 @@ class AtmosphereSolver:
                        "P_profile": P_profile,
                        "T_profile": T_profile,
                        "mu_profile": mu_profile,
-                       "atm_abundances": atm_abundances}
-        
+                       "atm_abundances": atm_abundances,
+                       "common_absorption_coeff": absorption_coeff}
+
         return output_dict

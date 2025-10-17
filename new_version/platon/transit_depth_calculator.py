@@ -124,6 +124,53 @@ class TransitDepthCalculator:
         self.atm._validate_params(T, logZ, CO_ratio, cloudtop_pressure)
         
     
+    def compute_depths_patchy(self, t_p_profile, star_radius, planet_mass, planet_radius,
+                              logZ=0, CO_ratio=0.53, CH4_mult=1,
+                              gases=None, vmrs=None,
+                              add_gas_absorption=True, add_H_minus_absorption=False,
+                              add_scattering=True, scattering_factor=1,
+                              scattering_slope=4, scattering_ref_wavelength=1e-6,
+                              add_collisional_absorption=True,
+                              cloudtop_pressure=xp.inf, cloud_cov_frac=0.0, custom_abundances=None,
+                              T_star=None, T_spot=None, spot_cov_frac=None,
+                              ri=None, frac_scale_height=1, number_density=0,
+                              part_size=1e-6, part_size_std=0.5, P_quench=1e-99,
+                              full_output=False, min_abundance=1e-99, min_cross_sec=1e-99, stellar_blackbody=False, zero_opacities=[]):
+
+        # First, compute depths for the cloudy part of the atmosphere
+        cloudy_wavelengths, cloudy_depths, cloudy_info = self.compute_depths(
+            t_p_profile, star_radius, planet_mass, planet_radius,
+            logZ, CO_ratio, CH4_mult, gases, vmrs,
+            add_gas_absorption, add_H_minus_absorption,
+            add_scattering, scattering_factor, scattering_slope, scattering_ref_wavelength,
+            add_collisional_absorption, cloudtop_pressure, custom_abundances,
+            None, None, T_star, T_spot, spot_cov_frac,
+            ri, frac_scale_height, number_density, part_size, part_size_std, P_quench,
+            True, min_abundance, min_cross_sec, stellar_blackbody, zero_opacities,
+            common_absorption_coeff=None)
+
+        # Now, compute depths for the clear part. The only difference is that
+        # scattering is off and there are no clouds.
+        clear_wavelengths, clear_depths, clear_info = self.compute_depths(
+            t_p_profile, star_radius, planet_mass, planet_radius,
+            logZ, CO_ratio, CH4_mult, gases, vmrs,
+            add_gas_absorption, add_H_minus_absorption,
+            True, 1, 4, 1e-6, # Use default Rayleigh scattering
+            add_collisional_absorption, xp.inf, custom_abundances,
+            None, None, T_star, T_spot, spot_cov_frac,
+            None, 1, 0, 1e-6, 0.5, P_quench, # Mie scattering off
+            True, min_abundance, min_cross_sec, stellar_blackbody, zero_opacities,
+            common_absorption_coeff=cloudy_info["common_absorption_coeff"])
+
+        # Combine the two
+        combined_depths = cloud_cov_frac * cloudy_depths + (1 - cloud_cov_frac) * clear_depths
+
+        if full_output:
+            return cloudy_wavelengths, combined_depths, (cloudy_info, clear_info)
+        else:
+            return cloudy_wavelengths, combined_depths, None
+
+
     def compute_depths(self, t_p_profile, star_radius, planet_mass, planet_radius,
                        logZ=0, CO_ratio=0.53, CH4_mult=1,
                        gases=None, vmrs=None,
@@ -136,7 +183,8 @@ class TransitDepthCalculator:
                        T_star=None, T_spot=None, spot_cov_frac=None,
                        ri=None, frac_scale_height=1, number_density=0,
                        part_size=1e-6, part_size_std=0.5, P_quench=1e-99,
-                       full_output=False, min_abundance=1e-99, min_cross_sec=1e-99, stellar_blackbody=False, zero_opacities=[]):
+                       full_output=False, min_abundance=1e-99, min_cross_sec=1e-99,
+                       stellar_blackbody=False, zero_opacities=[], common_absorption_coeff=None):
         '''
         Computes transit depths at a range of wavelengths, assuming an
         isothermal atmosphere.  To choose bins, call change_wavelength_bins().
@@ -229,7 +277,7 @@ class TransitDepthCalculator:
             Quench pressure in Pa.
         stellar_blackbody : bool, optional
             Whether to use a PHOENIX model for the stellar spectrum, or a blackbody
-        zero_opacities : list of strings                                                                                                                                                                   
+        zero_opacities : list of strings
             List of molecules to zero opacities for
         full_output : bool, optional
             If True, returns info_dict as a third return value.
@@ -261,7 +309,7 @@ class TransitDepthCalculator:
             #if temperature is not None:
             #    raise ValueError(
             #        "Cannot specify both temperature and custom T profile")
-            
+
             P_profile = custom_P_profile
             T_profile = custom_T_profile
         else:
@@ -271,7 +319,7 @@ class TransitDepthCalculator:
             #    NUM_LAYERS)
             #T_profile = xp.ones(len(P_profile)) * temperature
             P_profile = t_p_profile.pressures
-            T_profile = t_p_profile.temperatures 
+            T_profile = t_p_profile.temperatures
 
         atm_info = self.atm.compute_params(
             star_radius, planet_mass, planet_radius, P_profile, T_profile,
@@ -280,7 +328,8 @@ class TransitDepthCalculator:
             scattering_factor, scattering_slope, scattering_ref_wavelength,
             add_collisional_absorption, cloudtop_pressure, custom_abundances,
             T_star, T_spot, spot_cov_frac, ri, frac_scale_height,
-            number_density, part_size, part_size_std, P_quench, zero_opacities=zero_opacities)
+            number_density, part_size, part_size_std, P_quench, zero_opacities=zero_opacities,
+            common_absorption_coeff=common_absorption_coeff)
 
         radii = atm_info["radii"]
         dr = atm_info["dr"]
@@ -290,11 +339,11 @@ class TransitDepthCalculator:
 
         transit_depths = (radii.min() / star_radius)**2 \
             + 2 / star_radius**2 * absorption_fraction.dot(radii[1:] * dr)
-        
+
         #For correlated-k: transit_depths has n_gauss points for every wavelength; unbinned_depths
         #has 1 point for every wavelength
         binned_wavelengths, binned_depths, binned_stellar_spectrum, unbinned_wavelengths, unbinned_depths, unbinned_stellar_spectrum, unbinned_correction_factors = self._get_binned_corrected_depths(transit_depths, T_star, T_spot, spot_cov_frac, stellar_blackbody)
-        
+
         if full_output:
             atm_info["tau_los"] = xp.cpu(tau_los)
             atm_info["binned_stellar_spectrum"] = xp.cpu(binned_stellar_spectrum)
@@ -303,7 +352,7 @@ class TransitDepthCalculator:
             atm_info["unbinned_stellar_spectrum"] = xp.cpu(unbinned_stellar_spectrum)
             atm_info["unbinned_correction_factors"] = xp.cpu(unbinned_correction_factors)
             atm_info["contrib"] = xp.cpu(absorption_fraction)
-            
+
             for key in atm_info:
                 if type(atm_info[key]) == dict:
                     for subkey in atm_info[key]:

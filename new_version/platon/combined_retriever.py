@@ -203,27 +203,15 @@ class CombinedRetriever:
                 if np.any(np.isnan(t_p_profile.temperatures)):
                     raise AtmosphereError("Invalid T/P profile")
                 
-                if float(cloud_cov_frac) != 1.0:
-                    # Pre-calculate abundances once to avoid redundant computations
-                    custom_abundances = transit_calc.atm._get_abundances_array(logZ, CO_ratio, CH4_mult, None, gases, vmrs)
-                    
-                    transit_wavelengths, calculated_transit_depths_cloudy, transit_info_dict = transit_calc.compute_depths(
+                if float(cloud_cov_frac) > 0:
+                    transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths_patchy(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
-                        custom_abundances=custom_abundances,
+                        cloud_cov_frac = cloud_cov_frac,
                         scattering_factor=scatt_factor, scattering_slope=scatt_slope,
                         cloudtop_pressure=cloudtop_P, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
                         frac_scale_height=frac_scale_height, number_density=number_density,
                         part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
-                    transit_wavelengths, calculated_transit_depths_clear, transit_info_dict = transit_calc.compute_depths(
-                        t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
-                        custom_abundances=custom_abundances,
-                        scattering_factor=1, scattering_slope=4,
-                        cloudtop_pressure=np.inf, T_star=T_star,
-                        T_spot=T_spot, spot_cov_frac=spot_cov_frac,
-                        frac_scale_height=frac_scale_height, number_density=0,
-                        part_size=part_size, ri=None, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
-                    calculated_transit_depths = cloud_cov_frac * calculated_transit_depths_cloudy + (1 - cloud_cov_frac) * calculated_transit_depths_clear
                 else:
                     transit_wavelengths, calculated_transit_depths, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
