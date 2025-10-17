@@ -150,7 +150,7 @@ class AtmosphereSolver:
         #Calculate bound-free absorption coefficient
         k_bf = xp.zeros(len(wavelengths))
         cond = wavelengths < lambda_0
-        C = [152.519, 49.534, -118.858, 92.536, -34.194, 4.982]
+        C = xp.array([152.519, 49.534, -118.858, 92.536, -34.194, 4.982])
         f_lambda = xp.sum(xp.array([C[i-1] * (1/wavelengths[cond] - 1/lambda_0)**((i-1)/2) for i in range(1,7)]), axis=0)
         sigma = 1e-18 * wavelengths[cond]**3 * (1 / wavelengths[cond] - 1 / lambda_0)**1.5 * f_lambda
         k_bf[cond] = 0.75 * T**-2.5 * xp.exp(alpha/lambda_0 / T) * (1 - xp.exp(-alpha / wavelengths[cond] / T)) * sigma
