@@ -10,6 +10,7 @@ import dynesty.utils
 import copy
 import pickle
 import sys
+from contextlib import contextmanager
 
 from .psis import psisloo
 from .transit_depth_calculator import TransitDepthCalculator
@@ -58,6 +59,31 @@ class CombinedRetriever:
             line += format_str.format(name, value)
             
         return line
+    
+    @contextmanager
+    def _filter_absorption_data(self, fit_info, transit_calc, eclipse_calc):
+        """
+        A context manager to temporarily filter the absorption data for free
+        retrievals. This avoids state pollution by ensuring the original data is
+        always restored.
+        """
+        original_transit_abs_data = transit_calc.atm.absorption_data
+        original_eclipse_abs_data = eclipse_calc.atm.absorption_data if eclipse_calc else None
+
+        if fit_info.all_params['fit_vmr'].best_guess or fit_info.all_params['fit_clr'].best_guess:
+            gases_to_fit = fit_info.gases
+            filtered_data = {gas: original_transit_abs_data[gas] for gas in gases_to_fit if gas in original_transit_abs_data}
+            
+            transit_calc.atm.absorption_data = filtered_data
+            if eclipse_calc:
+                eclipse_calc.atm.absorption_data = filtered_data
+        
+        try:
+            yield
+        finally:
+            transit_calc.atm.absorption_data = original_transit_abs_data
+            if eclipse_calc:
+                eclipse_calc.atm.absorption_data = original_eclipse_abs_data
     
     def _validate_params(self, fit_info, calculator):
         # This assumes that the valid parameter space is rectangular, so that
@@ -177,10 +203,13 @@ class CombinedRetriever:
                 if np.any(np.isnan(t_p_profile.temperatures)):
                     raise AtmosphereError("Invalid T/P profile")
                 
-                if float(cloud_cov_frac) != 1.0: 
+                if float(cloud_cov_frac) != 1.0:
+                    # Pre-calculate abundances once to avoid redundant computations
+                    custom_abundances = transit_calc.atm._get_abundances_array(logZ, CO_ratio, CH4_mult, None, gases, vmrs)
+                    
                     transit_wavelengths, calculated_transit_depths_cloudy, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
-                        custom_abundances=None,
+                        custom_abundances=custom_abundances,
                         scattering_factor=scatt_factor, scattering_slope=scatt_slope,
                         cloudtop_pressure=cloudtop_P, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
@@ -188,7 +217,7 @@ class CombinedRetriever:
                         part_size=part_size, ri=ri, P_quench=P_quench, full_output=ret_best_fit, zero_opacities=zero_opacities)
                     transit_wavelengths, calculated_transit_depths_clear, transit_info_dict = transit_calc.compute_depths(
                         t_p_profile, Rs, Mp, Rp, logZ, CO_ratio, CH4_mult, gases, vmrs,
-                        custom_abundances=None,
+                        custom_abundances=custom_abundances,
                         scattering_factor=1, scattering_slope=4,
                         cloudtop_pressure=np.inf, T_star=T_star,
                         T_spot=T_spot, spot_cov_frac=spot_cov_frac,
@@ -260,6 +289,9 @@ class CombinedRetriever:
             assert(lnlike_per_point == -np.inf)
             ln_like = -np.inf
 
+        if ln_like < -1e30:
+            ln_like = -1e30
+
         return fit_info._ln_prior(params) + ln_like
 
 
@@ -329,10 +361,11 @@ class CombinedRetriever:
             args=(transit_calc, eclipse_calc, fit_info, transit_depths, transit_errors,
                                  eclipse_depths, eclipse_errors, zero_opacities))
 
-        for i, result in enumerate(sampler.sample(
-                initial_positions, iterations=nsteps)):
-            if (i + 1) % 10 == 0:
-                print("Step {}: {}".format(i + 1, self.pretty_print(fit_info)))
+        with self._filter_absorption_data(fit_info, transit_calc, eclipse_calc):
+            for i, result in enumerate(sampler.sample(
+                    initial_positions, iterations=nsteps)):
+                if (i + 1) % 10 == 0:
+                    print("Step {}: {}".format(i + 1, self.pretty_print(fit_info)))
 
         best_params_arr = sampler.flatchain[np.argmax(
             sampler.flatlnprobability)]
@@ -486,13 +519,17 @@ class CombinedRetriever:
                 assert(lnlike_per_point == -np.inf)
                 ln_like = -np.inf
             
+            if ln_like < -1e30:
+                ln_like = -1e30
+
             if np.random.randint(100) == 0:
                 print("\nEvaluated params: {}".format(self.pretty_print(fit_info)))
             return ln_like
 
         num_dim = fit_info._get_num_fit_params()
         sampler = NestedSampler(dynesty_ln_like, transform_prior, num_dim, bound='multi', nlive=nlive, **dynesty_kwargs)
-        sampler.run_nested(maxiter=maxiter, maxcall=maxcall)
+        with self._filter_absorption_data(fit_info, transit_calc, eclipse_calc):
+            sampler.run_nested(maxiter=maxiter, maxcall=maxcall)
         result = CustomDynestyResult(sampler.results)
         result.logp = result.logl #+ np.array([fit_info._ln_prior(params) for params in result.samples])
         best_params_arr = result.samples[np.argmax(result.logp)]
@@ -584,6 +621,9 @@ class CombinedRetriever:
             else:
                 assert(lnlike_per_point == -np.inf)
                 ln_like = -np.inf
+
+            if ln_like < -1e30:
+                ln_like = -1e30
             
             if np.random.randint(100) == 0:
                 print("\nEvaluated params: {}".format(self.pretty_print(fit_info)))
@@ -591,8 +631,9 @@ class CombinedRetriever:
 
         num_dim = fit_info._get_num_fit_params()
         basename = "multinest_" + str(np.random.randint(1000))
-        result = pymultinest.solve(LogLikelihood=multinest_ln_like, Prior=transform_prior,
-                                   n_dims=num_dim, outputfiles_basename=basename, verbose=True, resume=False, n_live_points=nlive)
+        with self._filter_absorption_data(fit_info, transit_calc, eclipse_calc):
+            result = pymultinest.solve(LogLikelihood=multinest_ln_like, Prior=transform_prior,
+                                    n_dims=num_dim, outputfiles_basename=basename, verbose=True, resume=False, n_live_points=nlive)
         a = pymultinest.Analyzer(outputfiles_basename=basename, n_params=num_dim)
         data = a.get_data()
         result["samples"] = data[:,2:]
