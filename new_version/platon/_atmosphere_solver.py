@@ -75,11 +75,15 @@ class AtmosphereSolver:
         self.method = method
         self._mie_cache = MieCache()
 
+        # Caching attributes
+        self.cache_gas_absorption = False
+        self.gas_absorption_cache = None
+        
         self.all_cross_secs = load_dict_from_pickle("data/all_cross_secs.pkl")
         self.all_radii = load_numpy("data/mie_radii.npy")
-        diffs = np.diff(np.log(self.all_radii))
-        self.d_ln_radii = np.median(diffs)
-        assert(np.allclose(diffs, self.d_ln_radii))
+        diffs = xp.diff(xp.log(self.all_radii))
+        self.d_ln_radii = xp.median(diffs)
+        assert(xp.allclose(diffs, self.d_ln_radii))
 
     def get_lambda_grid(self):
         return xp.cpu(self.lambda_grid)
@@ -267,11 +271,11 @@ class AtmosphereSolver:
             log_dense_xs = xp.log(dense_xs.flatten())
 
             n_bins = get_num_bins(log_dense_xs)
-            log_x_hist = xp.cpu(xp.histogram(log_dense_xs, bins=n_bins)[1])
+            log_x_hist = xp.histogram(log_dense_xs, bins=n_bins)[1]
             
-            Qext_hist = self._mie_cache.get_and_update(ri, np.exp(log_x_hist))
-            spl = scipy.interpolate.make_interp_spline(log_x_hist, Qext_hist)
-            spl = xp.interpolate.BSpline(xp.array(spl.t), xp.array(spl.c), spl.k)           
+            Qext_hist = self._mie_cache.get_and_update(ri, xp.exp(log_x_hist))
+            spl = xp.interpolate.make_interp_spline(log_x_hist, Qext_hist)
+            spl = xp.interpolate.BSpline(spl.t, spl.c, spl.k)
             Qext_intpl = spl(log_dense_xs).reshape((self.N_lambda, len(radii)))
             eff_cross_section = xp.trapz(probs*geometric_cross_section*Qext_intpl, z_scores)
 
@@ -441,7 +445,20 @@ class AtmosphereSolver:
 
         absorption_coeff = xp.zeros((int(xp.sum(T_cond)), int(xp.sum(P_cond)), len(self.lambda_grid)))
         if add_gas_absorption:
-            absorption_coeff += self._get_gas_absorption(abundances, P_cond, T_cond, zero_opacities=zero_opacities)
+            if self.cache_gas_absorption and self.gas_absorption_cache is None:
+                # First run (clear sky), compute and cache
+                gas_absorption = self._get_gas_absorption(abundances, P_cond, T_cond, zero_opacities=zero_opacities)
+                self.gas_absorption_cache = gas_absorption
+                absorption_coeff += gas_absorption
+            elif self.gas_absorption_cache is not None:
+                # Second run (cloudy sky), reuse from cache
+                cached_absorption = self.gas_absorption_cache
+                num_T = int(xp.sum(T_cond))
+                num_P = int(xp.sum(P_cond))
+                absorption_coeff += cached_absorption[:num_T, :num_P, :]
+            else:
+                # Not caching, just compute
+                absorption_coeff += self._get_gas_absorption(abundances, P_cond, T_cond, zero_opacities=zero_opacities)
         if add_H_minus_absorption:
             absorption_coeff += self._get_H_minus_absorption(abundances, P_cond, T_cond)
         if add_scattering:
