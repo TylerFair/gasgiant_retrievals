@@ -313,5 +313,64 @@ class TransitDepthCalculator:
             return xp.cpu(binned_wavelengths), xp.cpu(binned_depths), atm_info
 
         return xp.cpu(binned_wavelengths), xp.cpu(binned_depths), None
+
+    def compute_depths_patchy(self, t_p_profile, star_radius, planet_mass, planet_radius,
+                       cloud_cov_frac,
+                       logZ=0, CO_ratio=0.53, CH4_mult=1,
+                       gases=None, vmrs=None,
+                       add_gas_absorption=True, add_H_minus_absorption=False,
+                       add_scattering=True, scattering_factor=1,
+                       scattering_slope=4, scattering_ref_wavelength=1e-6,
+                       add_collisional_absorption=True,
+                       cloudtop_pressure=xp.inf, custom_abundances=None,
+                       custom_T_profile=None, custom_P_profile=None,
+                       T_star=None, T_spot=None, spot_cov_frac=None,
+                       ri=None, frac_scale_height=1, number_density=0,
+                       part_size=1e-6, part_size_std=0.5, P_quench=1e-99,
+                       full_output=False, min_abundance=1e-99, min_cross_sec=1e-99, stellar_blackbody=False, zero_opacities=[]):
+        """
+        Computes transit depths for a patchy cloud model.
+        This method is an optimized version for patchy clouds. It first computes
+        the clear-sky model to cache the gas absorption, then computes the cloudy
+        model reusing the cached data, and finally combines them.
+        """
+        # Tell AtmosphereSolver to cache the gas absorption computed for the clear case
+        self.atm.cache_gas_absorption = True
+
+        # First, compute clear atmosphere to populate cache
+        wavelengths_clear, depths_clear, _ = self.compute_depths(
+            t_p_profile, star_radius, planet_mass, planet_radius,
+            logZ, CO_ratio, CH4_mult, gases, vmrs, add_gas_absorption, add_H_minus_absorption,
+            True, 1, 4, scattering_ref_wavelength,
+            add_collisional_absorption, xp.inf, custom_abundances,
+            custom_T_profile, custom_P_profile,
+            T_star, T_spot, spot_cov_frac,
+            None, 1, 0, # ri, frac_scale_height, number_density for clear
+            part_size, part_size_std, P_quench,
+            False, # full_output=False, we don't need the info dict
+            min_abundance, min_cross_sec, stellar_blackbody, zero_opacities)
+
+        # Now compute cloudy atmosphere, which will reuse cache
+        wavelengths_cloudy, depths_cloudy, info_cloudy = self.compute_depths(
+            t_p_profile, star_radius, planet_mass, planet_radius,
+            logZ, CO_ratio, CH4_mult, gases, vmrs, add_gas_absorption, add_H_minus_absorption,
+            add_scattering,
+            scattering_factor, scattering_slope, scattering_ref_wavelength,
+            add_collisional_absorption, cloudtop_pressure, custom_abundances,
+            custom_T_profile, custom_P_profile,
+            T_star, T_spot, spot_cov_frac, ri, frac_scale_height,
+            number_density, part_size, part_size_std, P_quench,
+            full_output, min_abundance, min_cross_sec, stellar_blackbody, zero_opacities)
+
+        # Reset cache state
+        self.atm.cache_gas_absorption = False
+        self.atm.gas_absorption_cache = None
+
+        final_depths = cloud_cov_frac * depths_cloudy + (1 - cloud_cov_frac) * depths_clear
+
+        if full_output:
+            return wavelengths_cloudy, final_depths, info_cloudy
+        else:
+            return wavelengths_cloudy, final_depths, None
         
         
