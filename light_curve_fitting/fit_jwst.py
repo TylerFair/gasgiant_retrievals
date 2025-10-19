@@ -320,10 +320,10 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
             model,
             regularize_mass_matrix=False,
             init_strategy=numpyro.infer.init_to_value(values=init_params),
-            target_accept_prob=0.99
+            target_accept_prob=0.9
         ),
-        num_warmup=3000,
-        num_samples=3000,
+        num_warmup=1000,
+        num_samples=1000,
         progress_bar=True,
         jit_model_args=True
     )
