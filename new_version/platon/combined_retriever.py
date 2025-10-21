@@ -702,9 +702,11 @@ class CombinedRetriever:
                       eclipse_bins, eclipse_depths, eclipse_errors,
                       fit_info,
                       include_condensation=True, rad_method="xsec",
-                      nlive=250,
+                      nlive=250, nsteps=None,
                       num_final_samples=1000, zero_opacities=[],
                       **ultranest_kwargs):
+        import ultranest.stepsampler
+
         self.params_to_lnlike = {}
         transit_calc = None
         eclipse_calc = None
@@ -756,8 +758,18 @@ class CombinedRetriever:
         with self._filter_absorption_data(fit_info, transit_calc, eclipse_calc):
             sampler = ultranest.ReactiveNestedSampler(fit_info.fit_param_names, ultranest_ln_like, transform_prior,
                                     log_dir=basename, resume='overwrite', **ultranest_kwargs)
-            result = sampler.run(min_num_live_points=nlive) 
-        
+            if nsteps is not None:
+                num_params = fit_info._get_num_fit_params()
+                
+                print(f"Using SliceSampler with {nsteps} steps for {num_params} parameters")
+                sampler.stepsampler = ultranest.stepsampler.SliceSampler(
+                    nsteps=nsteps,
+                    generate_direction=ultranest.stepsampler.generate_mixture_random_direction,
+                    # adaptive_nsteps='move-distance',  # Uncomment to adaptively adjust steps
+                    # max_nsteps=400  # Maximum steps if using adaptive
+                )
+    
+            result = sampler.run(min_num_live_points=nlive)
         samples = result['samples']
         logl = result['weighted_samples']['logl']  # Correct way to access logl
         
