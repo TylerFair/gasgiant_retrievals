@@ -765,10 +765,11 @@ class CombinedRetriever:
                 sampler.stepsampler = ultranest.stepsampler.SliceSampler(
                     nsteps=nsteps,
                     generate_direction=ultranest.stepsampler.generate_mixture_random_direction,
-                    # adaptive_nsteps='move-distance',  # Uncomment to adaptively adjust steps
-                    # max_nsteps=400  # Maximum steps if using adaptive
+                     #adaptive_nsteps='move-distance',  # Uncomment to adaptively adjust steps
+                     #max_nsteps=400  # Maximum steps if using adaptive
+                     region_filter=True
                 )
-    
+        
             result = sampler.run(min_num_live_points=nlive)
         samples = result['samples']
         logl = result['weighted_samples']['logl']  # Correct way to access logl
@@ -893,3 +894,4 @@ class CombinedRetriever:
         
         fit_info = FitInfo(all_variables)
         return fit_info
+
