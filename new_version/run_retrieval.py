@@ -26,13 +26,13 @@ feh = 0.1
 #create custom stellar grid 
 # then do export PYSYN_CDBS=/Users/tyler/Downloads/SRA/platon/platon/data/grp/redcat/trds/ (put the donwloaded models in data )
 # or export PYSYN_CDBS=/home/tyler/hard_disk/platon/platon/data/grp/redcat/trds/
-generate_stellar_grid = True
+generate_stellar_grid = False
 
 if generate_stellar_grid:
     from platon.create_custom_stellar_spectrum import create_stellar_grid_data
     create_stellar_grid_data(logg, feh)
 
-profile_type = 'parametric'  # 'isothermal', 'parametric'
+profile_type = 'radiative_solution'  # 'isothermal', 'parametric'
 
 retriever = CombinedRetriever()
 
@@ -59,7 +59,19 @@ elif profile_type == 'parametric':
         alpha2=0.8, 
         log_P2=4,
         log_P3=6,   )
-
+elif profile_type == 'radiative_solution':
+    fit_info = retriever.get_default_fit_info(
+        Rs=Rs, Mp=Mp, Rp=Rp,
+        logZ=None, CO_ratio=None, fit_vmr=True,
+        log_cloudtop_P=3, log_scatt_factor=0., scatt_slope=4, scattering_ref_wavelength=1e-6,  # cloudtop pressure , haze factor, haze slope, haze ref wave
+        n=None, log_k=-np.inf, # no mie scattering
+        T_star=T_star, T_spot=4300, spot_cov_frac=0.05, cloud_cov_frac=0.8, # DO NOT DEL CLOUD COV FRAC
+        profile_type=profile_type,
+        a=16.04*Rs,
+        beta=0.5,
+        log_k_th=0,
+        log_gamma=0,
+        )
 
 fit_info.add_gaussian_fit_param('Mp', 0.013 * M_jup)
 fit_info.add_uniform_fit_param('Rp', 0.85 * Rp, 1.15 * Rp)
@@ -72,6 +84,11 @@ elif profile_type == 'parametric':
     fit_info.add_uniform_fit_param('log_P3', 3, 7)
     fit_info.add_uniform_fit_param('alpha1', 0.02, 2)
     fit_info.add_uniform_fit_param('alpha2', 0.02, 2)
+elif profile_type == 'radiative_solution':
+    fit_info.add_gaussian_fit_param('a', 0.75*Rs)
+    fit_info.add_uniform_fit_param('beta', 0, 1)
+    fit_info.add_uniform_fit_param('log_gamma', -0.5, 3.5)
+    fit_info.add_uniform_fit_param('log_k_th', -4, 0.5)
 
 fit_info.add_uniform_fit_param("log_cloudtop_P", 0, 8) 
 fit_info.add_uniform_fit_param("log_scatt_factor", -4, 8) # investigate -3, 3; -4, 10
@@ -92,17 +109,19 @@ all_gases = general_gases
 
 fit_info.add_gases_vmr(all_gases, 1e-12, 1e-1)
 
-result = retriever.run_multinest(bins, depths, errors,
+result = retriever.run_ultranest(bins, depths, errors,
                                  None, None, None,
                                  fit_info,
                                  #sample="rwalk",
-                                 rad_method="xsec",
-                                 nlive=250
+                                 #rad_method="xsec",
+                                 #nlive=250
+                                 nsteps=50
                                  )
-with open("retrieval_result_hatp18b_2.pkl", "wb") as f:
+with open("retrieval_result_hatp18b_ultranest.pkl", "wb") as f:
     pickle.dump(result, f)
 
 plotter = Plotter()
 plotter.plot_retrieval_transit_spectrum(result, prefix="best_fit")
-plotter.plot_retrieval_corner(result, filename="dynesty_corner.png")
+plotter.plot_retrieval_corner(result, filename="ultranest_corner.png")
+
 
