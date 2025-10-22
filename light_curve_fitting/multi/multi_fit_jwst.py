@@ -157,6 +157,13 @@ def compute_lc_spot(params, t):
 def compute_lc_gp_mean(params, t):
     """The mean function for the GP model is just the transit."""
     return _compute_transit_model(params, t) + params["c"]
+
+def compute_lc_gp_spectroscopic(params, t, gp_trend):
+    """Computes transit + scaled GP trend for spectroscopic light curves."""
+    lc_transit = _compute_transit_model(params, t)
+    # The GP trend is scaled by a new amplitude parameter A_gp
+    # and added to the transit model with a baseline offset 'c'.
+    return lc_transit + params["c"] + params["A_gp"] * gp_trend
 def build_gp(params, t):
     kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(params['GP_log_rho']),
@@ -259,6 +266,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         compute_lc_kernel = compute_lc_spot
     elif detrend_type == 'gp':
         compute_lc_kernel = compute_lc_gp_mean
+    elif detrend_type == 'gp_spectroscopic':
+        compute_lc_kernel = compute_lc_gp_spectroscopic
     elif detrend_type == 'none':
         compute_lc_kernel = compute_lc_none
     else:
@@ -268,7 +277,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                                mu_depths=None, PERIOD=None, trend_fixed=None,
                                ld_interpolated=None, ld_fixed=None,
                                mu_spot_amp=None, mu_spot_mu=None, mu_spot_sigma=None,
-                               mu_u_ld=None):
+                               mu_u_ld=None, gp_trend=None):
 
         num_lcs = jnp.atleast_2d(yerr).shape[0]
 
@@ -333,7 +342,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
         # Adjust vmap for multi-planet
-        y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
+        if detrend_type == 'gp_spectroscopic':
+            params['A_gp'] = numpyro.sample('A_gp', dist.Uniform(1e-1, 1e1).expand([num_lcs]))
+            in_axes['A_gp'] = 0
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, gp_trend)
+        else:
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
+
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model_static
@@ -1140,15 +1155,11 @@ def main():
 
         if detrending_type == 'gp':
             gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-            trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values
-            flux_lr = jnp.array(data.flux_lr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
-            temp_err = jnp.nanmedian(jnp.abs(0.5 * (flux_lr[:, :-2] + flux_lr[:, 2:]) - flux_lr[:, 1:-1]), axis=1, keepdims=True)
-            flux_err_lr = jnp.repeat(temp_err, flux_lr.shape[1], axis=1)
-            assert flux_lr.shape[1] == time_lr.shape[0]
-            assert flux_err_lr.shape == flux_lr.shape
-            detrend_type_multiwave = 'linear'
+            gp_trend = jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
+            detrend_type_multiwave = 'gp_spectroscopic'
         else:
             detrend_type_multiwave = detrending_type
+            gp_trend = None
 
 
         assert time_lr.dtype == 'float64', "time_lr should be float64"
@@ -1183,7 +1194,8 @@ def main():
         }
         if detrend_type_multiwave != 'none':
             init_params_lr['c'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['c'].values[0])
-            init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0])
+            if detrend_type_multiwave != 'gp_spectroscopic':
+                init_params_lr['v'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['v'].values[0])
         if detrend_type_multiwave == 'explinear':
             init_params_lr['A'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['A'].values[0])
             init_params_lr['tau'] = jnp.full(num_lcs_lr, bestfit_params_wl_df['tau'].values[0])
@@ -1223,6 +1235,10 @@ def main():
             model_run_args_lr['mu_spot_amp'] = SPOT_AMP_BASE
             model_run_args_lr['mu_spot_mu'] = SPOT_MU_BASE
             model_run_args_lr['mu_spot_sigma'] = SPOT_SIGMA_BASE
+        if detrend_type_multiwave == 'gp_spectroscopic':
+            model_run_args_lr['gp_trend'] = gp_trend
+            init_params_lr['A_gp'] = jnp.ones(num_lcs_lr)
+
 
         samples_lr = get_samples(
             model=lr_model_for_run,
@@ -1255,7 +1271,8 @@ def main():
         }
         if detrend_type_multiwave != 'none':
             map_params_lr['c'] = jnp.nanmedian(samples_lr["c"], axis=0)
-            map_params_lr['v'] = jnp.nanmedian(samples_lr["v"], axis=0)
+            if detrend_type_multiwave != 'gp_spectroscopic':
+                map_params_lr['v'] = jnp.nanmedian(samples_lr["v"], axis=0)
         if detrend_type_multiwave == 'explinear':
             map_params_lr['A'] = jnp.nanmedian(samples_lr['A'], axis=0)
             map_params_lr['tau'] = jnp.nanmedian(samples_lr['tau'], axis=0)
@@ -1276,7 +1293,8 @@ def main():
         }
         if detrend_type_multiwave != 'none':
             in_axes_map['c'] = 0
-            in_axes_map['v'] = 0
+            if detrend_type_multiwave != 'gp_spectroscopic':
+                in_axes_map['v'] = 0
         if detrend_type_multiwave == 'explinear':
             in_axes_map.update({'A': 0, 'tau': 0})
         if detrend_type_multiwave == 'spot':
@@ -1284,7 +1302,12 @@ def main():
 
         final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
 
-        model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
+        if detrend_type_multiwave == 'gp_spectroscopic':
+            map_params_lr['A_gp'] = jnp.nanmedian(samples_lr['A_gp'], axis=0)
+            final_in_axes['A_gp'] = 0
+            model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None))(map_params_lr, time_lr, gp_trend)
+        else:
+            model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
 
         residuals = flux_lr - model_all
         plot_noise_binning(
@@ -1430,14 +1453,11 @@ def main():
 
     if detrending_type == 'gp':
         gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-        trend_flux = gp_df['gp_flux'].values - gp_df['transit_model_flux'].values
-        flux_hr = jnp.array(data.flux_hr[:,~wl_mad_mask]) / jnp.array(trend_flux + 1.0)
-        temp_err = jnp.nanmedian(jnp.abs(0.5 * (flux_hr[:, :-2] + flux_hr[:, 2:]) - flux_hr[:, 1:-1]), axis=1, keepdims=True)
-        flux_err_hr = jnp.repeat(temp_err, flux_hr.shape[1], axis=1)
-        assert flux_hr.shape[1] == time_hr.shape[0]
-        assert flux_err_hr.shape == flux_hr.shape
+        gp_trend = jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
+        detrend_type_multiwave = 'gp_spectroscopic'
     else:
         detrend_type_multiwave = detrending_type
+        gp_trend = None
 
 
     if need_lowres_analysis:
@@ -1532,7 +1552,8 @@ def main():
     if hr_trend_mode == 'free':
         if detrend_type_multiwave != 'none':
             init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
-            init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
+            if detrend_type_multiwave != 'gp_spectroscopic':
+                init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
         if detrend_type_multiwave == 'explinear':
             init_params_hr["A"] = np.polyval(best_poly_coeffs_A, wl_hr)
             init_params_hr["tau"] = np.polyval(best_poly_coeffs_tau, wl_hr)
@@ -1546,6 +1567,9 @@ def main():
         trend_mode=hr_trend_mode,
         n_planets=n_planets
     )
+    if detrend_type_multiwave == 'gp_spectroscopic':
+        model_run_args_hr['gp_trend'] = gp_trend
+        init_params_hr['A_gp'] = jnp.ones(num_lcs_hr)
 
     samples_hr = get_samples(
         model=hr_model_for_run,
@@ -1569,7 +1593,8 @@ def main():
     # include trend terms if present in samples
     if detrend_type_multiwave != 'none' and "c" in samples_hr:
         map_params_hr["c"] = jnp.nanmedian(samples_hr["c"], axis=0)
-        map_params_hr["v"] = jnp.nanmedian(samples_hr["v"], axis=0)
+        if detrend_type_multiwave != 'gp_spectroscopic':
+            map_params_hr["v"] = jnp.nanmedian(samples_hr["v"], axis=0)
     if detrend_type_multiwave == 'explinear' and "A" in samples_hr:
         map_params_hr["A"] = jnp.nanmedian(samples_hr["A"], axis=0)
         map_params_hr["tau"] = jnp.nanmedian(samples_hr["tau"], axis=0)
@@ -1581,7 +1606,9 @@ def main():
     # prepare in_axes similar to low-res mapping so jax.vmap works
     in_axes_map_hr = {"rors": 0, "u": 0}
     if detrend_type_multiwave != 'none':
-        in_axes_map_hr.update({"c": 0, "v": 0})
+        in_axes_map_hr.update({"c": 0})
+        if detrend_type_multiwave != 'gp_spectroscopic':
+            in_axes_map_hr.update({"v": 0})
     if detrend_type_multiwave == 'explinear':
         in_axes_map_hr.update({"A": 0, "tau": 0})
     if detrend_type_multiwave == 'spot':
@@ -1591,7 +1618,12 @@ def main():
 
     # compute model and residuals on the HR time grid
     selected_kernel_hr = COMPUTE_KERNELS[detrend_type_multiwave]
-    model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None))(map_params_hr, time_hr)
+    if detrend_type_multiwave == 'gp_spectroscopic':
+        map_params_hr['A_gp'] = jnp.nanmedian(samples_hr['A_gp'], axis=0)
+        final_in_axes_hr['A_gp'] = 0
+        model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None))(map_params_hr, time_hr, gp_trend)
+    else:
+        model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None))(map_params_hr, time_hr)
     residuals_hr = np.array(flux_hr - model_all_hr)
 
     # save noise-binning plot
