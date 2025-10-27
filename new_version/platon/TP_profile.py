@@ -39,7 +39,7 @@ class Profile:
             self.set_parametric(
                 params_dict["T0"], 10**params_dict["log_P1"],
                 params_dict["alpha1"], params_dict["alpha2"],
-                10**params_dict["log_P2"], params_dict["log_P3"])
+                10**params_dict["log_P2"], 10**params_dict["log_P3"])
         elif profile_type == 'radiative_solution':
             radiative_keys = [
             'T_star', 'Rs', 'a', 'Mp', 'Rp', 'beta', 'log_k_th',
