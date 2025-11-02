@@ -10,5 +10,5 @@ JWST Flux cube -> Retrieval fitting kit.
   function following these ones. The full code is controlled by a .YAML file. 
 
 Works In Progress:
-- Make retrieval faster for most high-dimensional cases
+- Make retrieval faster for most high-dimensional cases [Done!!!! Final findings are pymultinest with vectorized TP profile and cloud caching for patchy clouds (~ 2 days?)
 - Add native multiple instrument offset support
