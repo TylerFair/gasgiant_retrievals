@@ -53,6 +53,8 @@ class Profile:
             }
 
             self.set_from_radiative_solution(**tp_params)
+        elif profile_type == 'twopoint':
+            self.set_twopoint(params_dict["T_top"], params_dict["T_bottom"])
         else:
             assert(False)
 
@@ -97,7 +99,11 @@ class Profile:
         self.temperatures[mask_region3] = T3
         
         return T2, T3
-
+    def set_twopoint(self, T_top, T_bottom):
+        log_P = self._log_pressures
+        log_P_top = xp.log10(xp.amin(self.pressures))
+        log_P_bottom = xp.log10(xp.amax(self.pressures))
+        self.temperatures = xp.interp(log_P, xp.array([log_P_top, log_P_bottom]), xp.array([T_top, T_bottom]))
     def set_from_opacity(self, T_irr, info_dict, visible_cutoff=0.8e-6, T_int=100):
         """Optimized opacity-based temperature profile"""
         # Convert to arrays once
