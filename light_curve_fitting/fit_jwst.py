@@ -561,7 +561,7 @@ def save_results(wavelengths, samples, csv_filename):
         header=header, comments=""
     )
     print(f"Transmission spectroscopy data saved to {csv_filename}")
-def save_detailed_fit_results(time, flux, flux_err, wavelengths, samples, map_params,
+def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err, samples, map_params,
                                transit_params, detrend_type, output_prefix, gp_trend=None):
     """
     Save detailed fit results including bestfit parameters and light curve components.
@@ -601,6 +601,7 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, samples, map_pa
     for i in range(n_wavelengths):
         row = {
             'wavelength': wavelengths[i],
+            'wavelength_err': wavelengths_err[i],
             'rors': np.nanmedian(samples['rors'][:, i]),
             'rors_err': np.std(samples['rors'][:, i]),
             'depth': np.nanmedian(samples['rors'][:, i]**2),
@@ -704,6 +705,7 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, samples, map_pa
         for j in range(n_times):
             lc_components.append({
                 'wavelength': wavelengths[i],
+                'wavelength_err': wavelengths_err[i],
                 'time': time[j],
                 'flux_raw': flux[i, j],
                 'flux_err': flux_err[i, j],
@@ -1588,6 +1590,7 @@ def main():
             flux=flux_lr,
             flux_err=flux_err_lr,
             wavelengths=data.wavelengths_lr,
+            wavelengths_err=data.wavelengths_err_lr,
             samples=samples_lr,
             map_params=map_params_lr,
             transit_params={"period": PERIOD_FIXED},
@@ -1828,6 +1831,7 @@ def main():
             flux=flux_hr,
             flux_err=flux_err_hr,
             wavelengths=data.wavelengths_hr,
+            wavelengths_err=data.wavelengths_err_hr,
             samples=samples_hr,
             map_params=map_params_hr,
             transit_params={"period": PERIOD_FIXED},
