@@ -561,6 +561,165 @@ def save_results(wavelengths, samples, csv_filename):
         header=header, comments=""
     )
     print(f"Transmission spectroscopy data saved to {csv_filename}")
+def save_detailed_fit_results(time, flux, flux_err, wavelengths, samples, map_params,
+                               transit_params, detrend_type, output_prefix, gp_trend=None):
+    """
+    Save detailed fit results including bestfit parameters and light curve components.
+
+    Parameters
+    ----------
+    time : array
+        Time array
+    flux : array (n_wavelengths, n_times)
+        Observed flux for each wavelength
+    flux_err : array (n_wavelengths, n_times)
+        Flux errors
+    wavelengths : array
+        Wavelength array
+    samples : dict
+        MCMC samples from get_samples()
+    map_params : dict
+        MAP parameters with median values
+    transit_params : dict
+        Fixed transit parameters (period, etc.)
+    detrend_type : str
+        Type of detrending used
+    output_prefix : str
+        Prefix for output files (e.g., 'output/planet_instrument_R40')
+    gp_trend : array, optional
+        GP trend if using gp_spectroscopic detrending
+    """
+
+    n_wavelengths = len(wavelengths)
+    n_times = len(time)
+
+    # Extract median parameters from samples
+    print(f"Saving detailed fit results to {output_prefix}_*.csv")
+
+    # 1. Save bestfit parameters per wavelength
+    param_rows = []
+    for i in range(n_wavelengths):
+        row = {
+            'wavelength': wavelengths[i],
+            'rors': np.nanmedian(samples['rors'][:, i]),
+            'rors_err': np.std(samples['rors'][:, i]),
+            'depth': np.nanmedian(samples['rors'][:, i]**2),
+            'depth_err': np.std(samples['rors'][:, i]**2),
+            'u1': np.nanmedian(samples['u'][:, i, 0]),
+            'u1_err': np.std(samples['u'][:, i, 0]),
+            'u2': np.nanmedian(samples['u'][:, i, 1]),
+            'u2_err': np.std(samples['u'][:, i, 1]),
+        }
+
+        if detrend_type != 'none':
+            row['c'] = np.nanmedian(samples['c'][:, i])
+            row['c_err'] = np.std(samples['c'][:, i])
+            if detrend_type != 'gp_spectroscopic':
+                row['v'] = np.nanmedian(samples['v'][:, i])
+                row['v_err'] = np.std(samples['v'][:, i])
+
+        if detrend_type == 'explinear':
+            row['A'] = np.nanmedian(samples['A'][:, i])
+            row['A_err'] = np.std(samples['A'][:, i])
+            row['tau'] = np.nanmedian(samples['tau'][:, i])
+            row['tau_err'] = np.std(samples['tau'][:, i])
+
+        if detrend_type == 'spot':
+            row['spot_amp'] = np.nanmedian(samples['spot_amp'][:, i])
+            row['spot_amp_err'] = np.std(samples['spot_amp'][:, i])
+            row['spot_mu'] = np.nanmedian(samples['spot_mu'][:, i])
+            row['spot_mu_err'] = np.std(samples['spot_mu'][:, i])
+            row['spot_sigma'] = np.nanmedian(samples['spot_sigma'][:, i])
+            row['spot_sigma_err'] = np.std(samples['spot_sigma'][:, i])
+
+        if detrend_type == 'gp_spectroscopic':
+            row['A_gp'] = np.nanmedian(samples['A_gp'][:, i])
+            row['A_gp_err'] = np.std(samples['A_gp'][:, i])
+
+        param_rows.append(row)
+
+    params_df = pd.DataFrame(param_rows)
+    params_df.to_csv(f"{output_prefix}_bestfit_params.csv", index=False)
+    print(f"Saved bestfit parameters to {output_prefix}_bestfit_params.csv")
+
+    # 2. Compute and save light curve components for each wavelength
+    # We'll compute: transit_model, trend, full_model, detrended_flux
+
+    lc_components = []
+
+    for i in range(n_wavelengths):
+        # Get parameters for this wavelength
+        rors_i_all_planets = np.atleast_1d(map_params['rors'][i])
+        u_i = np.asarray(map_params['u'][i])
+
+        # Compute multi-planet transit model
+        total_model_flux = np.zeros_like(time)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        num_planets = len(periods)
+
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(time)
+            total_model_flux += planet_model
+
+        transit_model = total_model_flux
+
+        # Compute trend
+        if detrend_type == 'gp_spectroscopic':
+            c_i = map_params['c'][i]
+            A_gp_i = map_params['A_gp'][i]
+            trend = c_i + A_gp_i * gp_trend
+        elif detrend_type != 'none':
+            c_i = map_params['c'][i]
+            v_i = map_params['v'][i]
+            t_shift = time - np.min(time)
+
+            if detrend_type == 'linear':
+                trend = c_i + v_i * t_shift
+            elif detrend_type == 'explinear':
+                A_i = map_params['A'][i]
+                tau_i = map_params['tau'][i]
+                trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
+            elif detrend_type == 'spot':
+                spot_amp = map_params['spot_amp'][i]
+                spot_mu = map_params['spot_mu'][i]
+                spot_sig = map_params['spot_sigma'][i]
+                trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (time - spot_mu)**2 / spot_sig**2)
+        else:
+            trend = np.ones_like(time)
+
+        full_model = transit_model + trend
+        detrended_flux = flux[i] - trend
+
+        # Store components for this wavelength
+        for j in range(n_times):
+            lc_components.append({
+                'wavelength': wavelengths[i],
+                'time': time[j],
+                'flux_raw': flux[i, j],
+                'flux_err': flux_err[i, j],
+                'transit_model': transit_model[j],
+                'trend': trend[j],
+                'full_model': full_model[j],
+                'detrended_flux': detrended_flux[j],
+                'residual': flux[i, j] - full_model[j]
+            })
+
+    lc_df = pd.DataFrame(lc_components)
+    lc_df.to_csv(f"{output_prefix}_lightcurves.csv", index=False)
+    print(f"Saved light curve components to {output_prefix}_lightcurves.csv")
+    print(f"  Contains {n_wavelengths} wavelengths x {n_times} time points = {len(lc_components)} rows")
+
+    return params_df, lc_df
 
 # ---------------------
 # Main Analysis
@@ -1424,7 +1583,18 @@ def main():
         plot_transmission_spectrum(wl_lr, samples_lr["rors"],
                             f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
-
+        save_detailed_fit_results(
+            time=time_lr,
+            flux=flux_lr,
+            flux_err=flux_err_lr,
+            wavelengths=data.wavelengths_lr,
+            samples=samples_lr,
+            map_params=map_params_lr,
+            transit_params={"period": PERIOD_FIXED},
+            detrend_type=detrend_type_multiwave,
+            output_prefix=f"{output_dir}/{instrument_full_str}_{lr_bin_str}",
+            gp_trend=gp_trend if detrend_type_multiwave == 'gp_spectroscopic' else None
+        )
         #oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)    
         in_transit_mask = jnp.zeros_like(time_lr, dtype=bool)
         for t0, duration in zip(T0_BASE, DURATION_BASE):
@@ -1653,7 +1823,18 @@ def main():
     plot_transmission_spectrum(wl_hr, samples_hr["rors"],
                             f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
-
+    save_detailed_fit_results(
+            time=time_hr,
+            flux=flux_hr,
+            flux_err=flux_err_hr,
+            wavelengths=data.wavelengths_hr,
+            samples=samples_hr,
+            map_params=map_params_hr,
+            transit_params={"period": PERIOD_FIXED},
+            detrend_type=detrend_type_multiwave,
+            output_prefix=f"{output_dir}/{instrument_full_str}_{hr_bin_str}",
+            gp_trend=gp_trend if detrend_type_multiwave == 'gp_spectroscopic' else None
+        )
     if "u" in samples_hr:
         u1_16, u1_median, u1_84 = np.percentile(np.array(samples_hr["u"][:,:,0]), [16, 50, 84], axis=0) # Shape: (n_samples, n_lcs, 2)
         u1_err_low = u1_median - u1_16
