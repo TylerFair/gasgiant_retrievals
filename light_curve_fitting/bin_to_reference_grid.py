@@ -62,9 +62,7 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     ----------
     input_wavelengths : ndarray, shape (n_input_wavelengths,)
         Input wavelength array (1D)
-    input_flux : ndarray, shape (n_input_wavelengths, n_times) or (n_times, n_input_wavelengths)
-        Input flux array. Can be either (wavelength, time) or (time, wavelength).
-        Function will detect and transpose if needed.
+    input_flux : ndarray, shape (n_input_wavelengths, n_times)
     input_err : ndarray, same shape as input_flux
         Input flux errors
     ref_wavelengths : ndarray
@@ -92,28 +90,17 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     The input flux can be in either (wavelength, time) or (time, wavelength) format.
     The function will detect the format and ensure output is always (wavelength, time).
     """
-
-    # Check if we need to transpose input flux
-    # Heuristic: if first dimension is much larger, it's probably time dimension
-    if input_flux.ndim == 2:
-        if input_flux.shape[0] > input_flux.shape[1] * 2:
-            # Probably (time, wavelength), transpose to (wavelength, time)
-            input_flux = input_flux.T
-            input_err = input_err.T
-            print("Detected (time, wavelength) format, transposing to (wavelength, time)")
-
+  
     # Ensure wavelengths is 1D
     input_wavelengths = np.asarray(input_wavelengths).ravel()
 
     # Calculate input wavelength bin edges
     # Assume input bins are uniform or calculate from neighboring points
-    if len(input_wavelengths) > 1:
-        input_werr = np.diff(input_wavelengths) / 2
-        input_werr = np.append(input_werr, input_werr[-1])
-        input_werr = np.insert(input_werr, 0, input_werr[0])
-        input_werr = np.convolve(input_werr, [0.5, 0.5], mode='valid')
-    else:
-        input_werr = np.array([0.01])  # Default fallback
+    input_werr = np.diff(input_wavelengths) / 2
+    input_werr = np.append(input_werr, input_werr[-1])
+    input_werr = np.insert(input_werr, 0, input_werr[0])
+    input_werr = np.convolve(input_werr, [0.5, 0.5], mode='valid')
+
 
     input_wave_low = input_wavelengths - input_werr
     input_wave_up = input_wavelengths + input_werr
