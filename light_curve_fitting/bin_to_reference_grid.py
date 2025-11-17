@@ -131,14 +131,8 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     # Note: bin_at_bins expects flux shape (n_times, n_wavelengths) for the input
     # and returns shape (n_times, n_output_wavelengths)
 
-    if input_flux.ndim == 1:
-        # 1D flux, add time dimension
-        input_flux_2d = input_flux[np.newaxis, :]
-        input_err_2d = input_err[np.newaxis, :]
-    else:
-        # Already 2D, transpose to (time, wavelength) for bin_at_bins
-        input_flux_2d = input_flux.T
-        input_err_2d = input_err.T
+    input_flux_2d = input_flux.T
+    input_err_2d = input_err.T
 
     print(f"Binning {len(input_wavelengths)} input bins to {len(ref_wavelengths)} reference bins...")
 
@@ -158,9 +152,8 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     wavelength_errs_out = (binned_wave_up - binned_wave_low) / 2
 
     # Transpose back to (wavelength, time) if needed
-    if binned_flux.ndim == 2:
-        binned_flux = binned_flux.T
-        binned_err = binned_err.T
+    binned_flux = binned_flux.T
+    binned_err = binned_err.T
 
     # Handle method (bin_at_bins does sum, so we need to average if requested)
     if method == 'average':
