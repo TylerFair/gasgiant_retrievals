@@ -53,30 +53,72 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     resolution = cfg.get('resolution', None)
     pixels = cfg.get('pixels', None)
 
-    
+
     flux_unbinned_copy = flux_unbinned * 1.0
     flux_err_unbinned_copy = flux_err_unbinned * 1.0
-    
+
     # Transpose flux for binning: (n_time, n_wavelength) -> (n_wavelength, n_time)
     flux_transposed = jnp.array(flux_unbinned_copy.T)
     flux_err_transposed = jnp.array(flux_err_unbinned_copy.T)
-    
+
+    # Check if using reference grid for high or low resolution
+    use_reference_grid_hr = False
+    use_reference_grid_lr = False
+    if resolution is not None:
+        if resolution.get('high') == 'reference':
+            if resolution.get('reference_grid') is None:
+                raise ValueError("resolution.high='reference' requires resolution.reference_grid to be set in config!")
+            use_reference_grid_hr = True
+            reference_grid_path_hr = resolution.get('reference_grid')
+            print(f"Using reference wavelength grid for HIGH resolution from: {reference_grid_path_hr}")
+        if resolution.get('low') == 'reference':
+            if resolution.get('reference_grid_lr') is None:
+                raise ValueError("resolution.low='reference' requires resolution.reference_grid_lr to be set in config!")
+            use_reference_grid_lr = True
+            reference_grid_path_lr = resolution.get('reference_grid_lr')
+            print(f"Using reference wavelength grid for LOW resolution from: {reference_grid_path_lr}")
+
     # Low resolution binning
     if resolution is not None:
-        wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
-            wavelengths, flux_transposed, flux_err_transposed, resolution.get('low'), method='average'
-        )
-         
+        if use_reference_grid_lr:
+            # Bin to reference grid for low resolution
+            # flux_transposed is already (wavelength, time) format
+            from bin_to_reference_grid import bin_to_reference_grid_simple
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_to_reference_grid_simple(
+                wavelengths, flux_transposed, flux_err_transposed,
+                reference_grid_path_lr, trim_to_overlap=True, method='average',
+            )
+        else:
+            # Regular resolution binning - make sure it's a number
+            low_res = resolution.get('low')
+            if not isinstance(low_res, (int, float)):
+                raise ValueError(f"resolution.low must be a number or 'reference'. Got: {low_res}")
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
+                wavelengths, flux_transposed, flux_err_transposed, low_res, method='average'
+            )
+
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
-    
+
         # High resolution binning
         if resolution.get('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
+        elif use_reference_grid_hr:
+            # Bin to reference grid
+            # flux_transposed is already (wavelength, time) format
+            from bin_to_reference_grid import bin_to_reference_grid_simple
+            wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_to_reference_grid_simple(
+                wavelengths, flux_transposed, flux_err_transposed,
+                reference_grid_path_hr, trim_to_overlap=True, method='average',
+            )
         else:
+            # Regular resolution binning - make sure it's a number
+            high_res = resolution.get('high')
+            if not isinstance(high_res, (int, float)):
+                raise ValueError(f"resolution.high must be a number, 'native', or 'reference'. Got: {high_res}")
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
-                wavelengths, flux_transposed, flux_err_transposed, resolution.get('high'), method='average'
+                wavelengths, flux_transposed, flux_err_transposed, high_res, method='average'
             )
             
         n_hr = min(len(wl_hr), flux_hr.shape[0], flux_err_hr.shape[0], len(wl_err_hr))
@@ -100,20 +142,52 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     
         flux_lr, flux_err_lr = flux_lr[:, keep_t_post], flux_err_lr[:, keep_t_post]
         flux_hr, flux_err_hr = flux_hr[:, keep_t_post], flux_err_hr[:, keep_t_post]
-    
+
+        print(f"\nAfter normalization and filtering:")
+        print(f"  flux_hr range: {np.nanmin(flux_hr):.6f} - {np.nanmax(flux_hr):.6f}")
+        print(f"  flux_err_hr range: {np.nanmin(flux_err_hr):.6f} - {np.nanmax(flux_err_hr):.6f}")
+        print(f"  flux_err_hr median: {np.nanmedian(flux_err_hr):.6f}")
+
         assert wl_lr.shape[0] == flux_lr.shape[0] == flux_err_lr.shape[0] == wl_err_lr.shape[0], "LR channels misaligned"
         assert wl_hr.shape[0] == flux_hr.shape[0] == flux_err_hr.shape[0] == wl_err_hr.shape[0], "HR channels misaligned"
     elif cfg.get('pixels', None) is not None:
-        wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_pixel(
-        wavelengths, flux_transposed, flux_err_transposed, pixels.get('low'))
-     
+        # Check if using reference grid for pixels mode too
+        use_reference_grid_pixels_hr = False
+        use_reference_grid_pixels_lr = False
+        if pixels.get('high') == 'reference' and pixels.get('reference_grid') is not None:
+            use_reference_grid_pixels_hr = True
+            reference_grid_path_hr = pixels.get('reference_grid')
+            print(f"Using reference wavelength grid for HIGH resolution from: {reference_grid_path_hr}")
+        if pixels.get('low') == 'reference' and pixels.get('reference_grid_lr') is not None:
+            use_reference_grid_pixels_lr = True
+            reference_grid_path_lr = pixels.get('reference_grid_lr')
+            print(f"Using reference wavelength grid for LOW resolution from: {reference_grid_path_lr}")
+
+        # Low resolution binning
+        if use_reference_grid_pixels_lr:
+            from bin_to_reference_grid import bin_to_reference_grid_simple
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_to_reference_grid_simple(
+                wavelengths, flux_transposed, flux_err_transposed,
+                reference_grid_path_lr, trim_to_overlap=True, method='average',
+            )
+        else:
+            wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_pixel(
+            wavelengths, flux_transposed, flux_err_transposed, pixels.get('low'))
+
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
-    
+
         # High resolution binning
         if pixels.get('high') == 'native':
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = wavelengths, wavelengths_err, flux_transposed, flux_err_transposed
+        elif use_reference_grid_pixels_hr:
+            # Bin to reference grid
+            from bin_to_reference_grid import bin_to_reference_grid_simple
+            wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_to_reference_grid_simple(
+                wavelengths, flux_transposed, flux_err_transposed,
+                reference_grid_path_hr, trim_to_overlap=True, method='average',
+            )
         else:
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_pixel(
                 wavelengths, flux_transposed, flux_err_transposed, pixels.get('high'))
