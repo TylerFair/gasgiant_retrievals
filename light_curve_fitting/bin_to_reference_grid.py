@@ -48,7 +48,6 @@ def load_reference_grid(reference_params_csv):
 
     return wavelengths, wavelength_errs
 
-
 def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
                           ref_wavelengths, ref_wavelength_errs,
                           trim_to_overlap=True, method='average'):
@@ -57,40 +56,7 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
 
     This function uses exotedrf.stage4.bin_at_bins to bin the input data to the exact
     wavelength bins defined by the reference grid.
-
-    Parameters
-    ----------
-    input_wavelengths : ndarray, shape (n_input_wavelengths,)
-        Input wavelength array (1D)
-    input_flux : ndarray, shape (n_input_wavelengths, n_times)
-    input_err : ndarray, same shape as input_flux
-        Input flux errors
-    ref_wavelengths : ndarray
-        Reference wavelength bin centers
-    ref_wavelength_errs : ndarray
-        Reference wavelength bin half-widths
-    trim_to_overlap : bool, optional
-        If True, only return bins that overlap with input wavelength range
-    method : str, optional
-        Binning method - 'sum' or 'average' (default: 'average')
-
-    Returns
-    -------
-    wavelengths_out : ndarray
-        Output wavelength bin centers
-    wavelength_errs_out : ndarray
-        Output wavelength bin half-widths
-    flux_out : ndarray, shape (n_output_wavelengths, n_times)
-        Binned flux
-    err_out : ndarray, same shape as flux_out
-        Binned errors
-
-    Notes
-    -----
-    The input flux can be in either (wavelength, time) or (time, wavelength) format.
-    The function will detect the format and ensure output is always (wavelength, time).
     """
-  
     # Ensure wavelengths is 1D
     input_wavelengths = np.asarray(input_wavelengths).ravel()
 
@@ -108,7 +74,6 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     # Calculate reference wavelength bin edges
     ref_wave_low = ref_wavelengths - ref_wavelength_errs
     ref_wave_up = ref_wavelengths + ref_wavelength_errs
-
     # Optionally trim to overlapping region
     if trim_to_overlap:
         overlap_min = max(input_wavelengths.min(), ref_wavelengths.min())
@@ -137,39 +102,41 @@ def bin_to_reference_grid(input_wavelengths, input_flux, input_err,
     print(f"Binning {len(input_wavelengths)} input bins to {len(ref_wavelengths)} reference bins...")
 
     # Call bin_at_bins
-    binned_wave_low, binned_wave_up, binned_flux, binned_err = bin_at_bins(
-        input_wave_low, input_wave_up,
-        input_flux_2d, input_err_2d,
-        ref_wave_low, ref_wave_up
-    )
+    # Call bin_at_bins for flux (we'll recalculate errors properly)
+    binned_wave_low, binned_wave_up, binned_flux, _ = bin_at_bins(
+      input_wave_low, input_wave_up,
+      input_flux_2d, input_err_2d,
+      ref_wave_low, ref_wave_up
+      )
+  # Recalculate errors properly using quadrature
+    binned_err = np.zeros_like(binned_flux)
+    for j in range(len(ref_wavelengths)):
+        low = ref_wave_low[j]
+        up = ref_wave_up[j]
+        mask = (input_wavelengths >= low) & (input_wavelengths < up)
+        if np.any(mask):
+            # Proper quadrature: sqrt(sum of squares)
+            binned_err[:, j] = np.sqrt(np.nansum(input_err_2d[:, mask]**2, axis=1))
 
-    # bin_at_bins returns 2D arrays even for wavelengths, take first row
+  # bin_at_bins returns 2D arrays even for wavelengths, take first row
     binned_wave_low = binned_wave_low[0, :]
     binned_wave_up = binned_wave_up[0, :]
 
-    # Calculate output wavelengths and errors
+  # Calculate output wavelengths and errors
     wavelengths_out = (binned_wave_low + binned_wave_up) / 2
     wavelength_errs_out = (binned_wave_up - binned_wave_low) / 2
 
-    # Transpose back to (wavelength, time) if needed
-    binned_flux = binned_flux.T
-    binned_err = binned_err.T
+  # Transpose back to (wavelength, time)
+    if binned_flux.ndim == 2:
+        binned_flux = binned_flux.T
+        binned_err = binned_err.T
 
-    # Handle method (bin_at_bins does sum, so we need to average if requested)
-    if method == 'average':
-        # Count how many input bins contributed to each output bin
-        # This is an approximation - we divide by a factor based on bin width ratio
-        avg_input_width = np.mean(2 * input_werr)
-        for i in range(len(wavelengths_out)):
-            ref_width = 2 * wavelength_errs_out[i]
-            n_contrib = ref_width / avg_input_width
-            if n_contrib > 0:
-                binned_flux[i] /= n_contrib
-                binned_err[i] /= n_contrib
-
+    print(f"\n=== AFTER AVERAGING ===")
+    print(f"binned_flux range: {np.min(binned_flux):.1f} - {np.max(binned_flux):.1f}")
+    print(f"binned_err range: {np.min(binned_err):.6f} - {np.max(binned_err):.6f}")
+    print(f"binned_err / binned_flux: {np.median(binned_err / binned_flux):.6f}")
     print(f"Binning complete!")
     print(f"  Output shape: {binned_flux.shape}")
-
     return wavelengths_out, wavelength_errs_out, binned_flux, binned_err
 
 
