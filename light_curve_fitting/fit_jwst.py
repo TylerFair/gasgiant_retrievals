@@ -562,7 +562,8 @@ def save_results(wavelengths, samples, csv_filename):
     )
     print(f"Transmission spectroscopy data saved to {csv_filename}")
 def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err, samples, map_params,
-                               transit_params, detrend_type, output_prefix, gp_trend=None):
+                               transit_params, detrend_type, output_prefix,
+                               total_error_fit=None, gp_trend=None):
     """
     Save detailed fit results including bestfit parameters and light curve components.
 
@@ -586,6 +587,8 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         Type of detrending used
     output_prefix : str
         Prefix for output files (e.g., 'output/planet_instrument_R40')
+    total_error_fit : array, optional
+        Best-fit total error for each wavelength.
     gp_trend : array, optional
         GP trend if using gp_spectroscopic detrending
     """
@@ -701,6 +704,12 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         full_model = transit_model + trend
         detrended_flux = flux[i] - trend
 
+        # Broadcast total_error_fit if provided
+        if total_error_fit is not None:
+            total_error_fit_broadcast = np.broadcast_to(total_error_fit[:, np.newaxis], (n_wavelengths, n_times))
+        else:
+            # Fallback to original errors if not provided
+            total_error_fit_broadcast = flux_err
         # Store components for this wavelength
         for j in range(n_times):
             lc_components.append({
@@ -708,7 +717,8 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                 'wavelength_err': wavelengths_err[i],
                 'time': time[j],
                 'flux_raw': flux[i, j],
-                'flux_err': flux_err[i, j],
+                'flux_err_raw': flux_err[i, j],
+                'flux_err_fit': total_error_fit_broadcast[i, j],
                 'transit_model': transit_model[j],
                 'trend': trend[j],
                 'full_model': full_model[j],
@@ -1180,7 +1190,7 @@ def main():
                 wl_gp = tinygp.GaussianProcess(
                     wl_kernel,
                    data.wl_time[~wl_mad_mask],
-                    diag=jnp.exp(bestfit_params_wl['error']**2,
+                    diag=bestfit_params_wl['error']**2,
                    # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
                     mean=partial(compute_lc_gp_mean, bestfit_params_wl),
                 )
@@ -1595,6 +1605,7 @@ def main():
             transit_params={"period": PERIOD_FIXED},
             detrend_type=detrend_type_multiwave,
             output_prefix=f"{output_dir}/{instrument_full_str}_{lr_bin_str}",
+            total_error_fit=median_total_error_lr,
             gp_trend=gp_trend if detrend_type_multiwave == 'gp_spectroscopic' else None
         )
         #oot_mask_lr = (time_lr < T0_BASE - 0.6 * DURATION_BASE) | (time_lr > T0_BASE + 0.6 * DURATION_BASE)    
@@ -1836,6 +1847,7 @@ def main():
             transit_params={"period": PERIOD_FIXED},
             detrend_type=detrend_type_multiwave,
             output_prefix=f"{output_dir}/{instrument_full_str}_{hr_bin_str}",
+            total_error_fit=median_total_error_hr,
             gp_trend=gp_trend if detrend_type_multiwave == 'gp_spectroscopic' else None
         )
     if "u" in samples_hr:
