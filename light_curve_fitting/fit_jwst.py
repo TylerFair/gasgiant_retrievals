@@ -164,16 +164,16 @@ def compute_lc_gp_spectroscopic(params, t, gp_trend):
     # The GP trend is scaled by a new amplitude parameter A_gp
     # and added to the transit model with a baseline offset 'c'.
     return lc_transit + params["c"] + params["A_gp"] * gp_trend
-def build_gp(params, t):
+def build_gp(params, t, error):
     kernel = tinygp.kernels.quasisep.Matern32(
                 scale=jnp.exp(params['GP_log_rho']),
                 sigma=jnp.exp(params['GP_log_sigma']),
             )
-    return tinygp.GaussianProcess(kernel, t, diag=jnp.exp(params["logs2"]),
+    return tinygp.GaussianProcess(kernel, t, diag=error**2,
               mean=partial(compute_lc_gp_mean, params))
 @jax.jit
-def loss(params, t, y):
-    gp = build_gp(params, t)
+def loss(params, t, y, error):
+    gp = build_gp(params, t, error)
     return -gp.log_probability(y)
 def create_whitelight_model(detrend_type='linear', n_planets=1):
     """
@@ -239,11 +239,11 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = 0.0
 
-            params['logs2'] = numpyro.sample('logs2', dist.Uniform(2*jnp.log(1e-6), 2*jnp.log(1.0)))
+            #params['logs2'] = numpyro.sample('logs2', dist.Uniform(jnp.log(1e-9), jnp.log(1)))
             params['GP_log_sigma']  = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
             params['GP_log_rho']  = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(1e-3), jnp.log(1e2)))
 
-            gp = build_gp(params, t)
+            gp = build_gp(params, t, error)
 
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
         else:
@@ -878,8 +878,7 @@ def main():
      'gp': compute_lc_gp_mean,
     'none': compute_lc_none,
     'gp_spectroscopic': compute_lc_gp_spectroscopic}
-
-
+     
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
     if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'MIRI/LRS':
@@ -927,9 +926,9 @@ def main():
                 init_params_wl['spot_mu'] = spot_mu
                 init_params_wl['spot_sigma'] = spot_sigma
             elif detrending_type == 'gp':
-                init_params_wl['logs2'] = jnp.log(2*jnp.nanmedian(data.wl_flux_err))
+                #init_params_wl['logs2'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
-                init_params_wl['GP_log_rho'] = jnp.log(0.1)
+                init_params_wl['GP_log_rho'] = jnp.log(1)
 
             if detrending_type == 'gp':
                 print("Please make sure config is CPU for GP whitelight fit!")
@@ -944,17 +943,16 @@ def main():
             if detrending_type == 'spot':
                 whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
 
-
-
+            print(jnp.log(jnp.nanmedian(data.wl_flux_err)))
             if detrending_type == 'gp':
                 solver = jaxopt.ScipyMinimize(fun=loss)
                 init_params = jax.tree_util.tree_map(jnp.asarray, init_params_wl|hyper_params_wl)
-                soln = solver.run(init_params, data.wl_time, data.wl_flux)
+                soln = solver.run(init_params, data.wl_time, data.wl_flux, data.wl_flux_err)
                 init_params_wl['GP_log_sigma'] = soln.params['GP_log_sigma']
                 init_params_wl['GP_log_rho'] = soln.params['GP_log_rho']
-                init_params_wl['logs2'] = soln.params['logs2']
-
-
+               # init_params_wl['logs2'] = soln.params['logs2']
+            #print(init_params_wl['logs2'])
+            #print(jnp.min(data.wl_time), jnp.max(data.wl_time), jnp.min(data.wl_flux), jnp.max(data.wl_flux), jnp.min(data.wl_flux_err), jnp.max(data.wl_flux_err))
             soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             if detrending_type == 'spot':
                 amp0     = float(init_params_wl['spot_amp'])
@@ -1085,6 +1083,7 @@ def main():
             bestfit_params_wl['rors_err'] = jnp.array(rors_err)
             bestfit_params_wl['depths_err'] = jnp.array(depths_err)
 
+            bestfit_params_wl['error'] = jnp.nanmedian(wl_samples['error'])
             if detrending_type != 'none':
                 bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
                 bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
@@ -1096,7 +1095,7 @@ def main():
                 bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
                 bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
             elif detrending_type == 'gp':
-                bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
+                #bestfit_params_wl['logs2'] = jnp.nanmedian(wl_samples['logs2'])
                 bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
                 bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
 
@@ -1117,7 +1116,7 @@ def main():
                 wl_gp = tinygp.GaussianProcess(
                     wl_kernel,
                     data.wl_time,
-                    diag=jnp.exp(bestfit_params_wl['logs2']),
+                    diag=bestfit_params_wl['error']**2,
                     mean=partial(compute_lc_gp_mean, bestfit_params_wl),
                 )
                 cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
@@ -1181,7 +1180,7 @@ def main():
                 wl_gp = tinygp.GaussianProcess(
                     wl_kernel,
                    data.wl_time[~wl_mad_mask],
-                    diag=jnp.exp(bestfit_params_wl['logs2']),
+                    diag=jnp.exp(bestfit_params_wl['error']**2,
                    # mean=partial(compute_lc_from_params, bestfit_params_wl, detrend_type='gp'),
                     mean=partial(compute_lc_gp_mean, bestfit_params_wl),
                 )
@@ -1240,7 +1239,7 @@ def main():
                     row['spot_mu'] = bestfit_params_wl['spot_mu']
                     row['spot_sigma'] = bestfit_params_wl['spot_sigma']
                 elif detrending_type == 'gp':
-                    row['logs2'] = bestfit_params_wl['logs2']
+                    #row['logs2'] = bestfit_params_wl['logs2']
                     row['GP_log_sigma'] = bestfit_params_wl['GP_log_sigma']
                     row['GP_log_rho'] = bestfit_params_wl['GP_log_rho']
                 
@@ -1425,7 +1424,7 @@ def main():
             trend_spot_amp_lr = np.array(samples_lr["spot_amp"])
             trend_spot_mu_lr = np.array(samples_lr["spot_mu"])
             trend_spot_sigma_lr = np.array(samples_lr["spot_sigma"])
-
+        
         map_params_lr = {
             "duration": DURATION_BASE,
             "t0": T0_BASE,
