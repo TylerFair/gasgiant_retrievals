@@ -45,8 +45,12 @@ def load_config(path):
 
 def _noise_binning_stats(residuals, n_bins=30, max_bin=None):
     """
-    residuals: array-like, shape (n_channels, n_times)
-    Returns: bins, median_sigma, p16, p84, expected_white_sigma
+    residuals: array-like, shape (n_channels, n_times) or (n_times,)
+    Returns: bins, median_sigma, p16, p84, expected_white_median, expected_white_per_channel
+    - expected_white_median: sigma1_med / sqrt(bins)
+    - expected_white_per_channel: shape (n_channels, len(bins)) = sigma1_channel[:, None] / sqrt(bins)
+    Notes:
+    - For very large bin sizes that produce < 2 binned segments we return NaN so they don't bias medians.
     """
     residuals = np.array(residuals)
     if residuals.ndim == 1:
@@ -66,31 +70,44 @@ def _noise_binning_stats(residuals, n_bins=30, max_bin=None):
                 continue
             r_trunc = r[:m].reshape(-1, b)
             means = r_trunc.mean(axis=1)
-            if means.size > 1:
-                sigma_b_channels[i, j] = np.std(means, ddof=1)
+            # require at least 2 binned segments to compute a sensible std
+            if means.size >= 2:
+                # ddof=0 yields RMS / population std; using ddof=1 is an option
+                sigma_b_channels[i, j] = np.std(means, ddof=0)
             else:
-                sigma_b_channels[i, j] = 0.0
+                sigma_b_channels[i, j] = np.nan
+
     sigma_med = np.nanmedian(sigma_b_channels, axis=0)
     sigma_16 = np.nanpercentile(sigma_b_channels, 16, axis=0)
     sigma_84 = np.nanpercentile(sigma_b_channels, 84, axis=0)
     # expected white-noise scaling using median unbinned sigma across channels
-    sigma1_channels = np.nanstd(residuals, axis=1, ddof=1)
+    sigma1_channels = np.nanstd(residuals, axis=1, ddof=0)
     sigma1_med = np.nanmedian(sigma1_channels)
-    expected_white = sigma1_med / np.sqrt(bins)
-    return bins, sigma_med, sigma_16, sigma_84, expected_white
+    expected_white_per_channel = sigma1_channels[:, None] / np.sqrt(bins)
+    expected_white_median = sigma1_med / np.sqrt(bins)
+    return bins, sigma_med, sigma_16, sigma_84, expected_white_median, expected_white_per_channel
 
-def plot_noise_binning(residuals, outpath, title=None):
+def plot_noise_binning(residuals, outpath, title=None, to_ppm=True, show_per_channel_expected=False):
     """
     Create a log-log plot of binned noise vs bin size and save to outpath.
     residuals shape: (n_channels, n_times) or (n_times,)
+    Parameters:
+      - to_ppm: multiply y-axis by 1e6 to show ppm
+      - show_per_channel_expected: plot faint expected 1/sqrt(N) lines for each channel
     """
-    bins, sigma_med, sigma_16, sigma_84, expected_white = _noise_binning_stats(residuals)
+    bins, sigma_med, sigma_16, sigma_84, expected_white_med, expected_white_pc = _noise_binning_stats(residuals)
+    factor = 1e6 if to_ppm else 1.0
     plt.figure(figsize=(6,4))
-    plt.loglog(bins, sigma_med, 'k-o', label='Measured (median across channels)')
-    plt.fill_between(bins, sigma_16, sigma_84, color='gray', alpha=0.3, label='16-84%')
-    plt.loglog(bins, expected_white, 'r--', label='White-noise expectation (σ₁/√N)')
+    plt.loglog(bins, sigma_med * factor, 'k-o', label='Measured (median across channels)')
+    plt.fill_between(bins, sigma_16 * factor, sigma_84 * factor, color='gray', alpha=0.3, label='16-84%')
+    # plot median white-noise expectation
+    plt.loglog(bins, expected_white_med * factor, 'r--', label='White-noise expectation (σ₁/√N)')
+    if show_per_channel_expected and expected_white_pc is not None:
+        for ch in range(expected_white_pc.shape[0]):
+            plt.loglog(bins, expected_white_pc[ch, :] * factor, color='r', alpha=0.12)
     plt.xlabel('Bin size (number of points)')
-    plt.ylabel('RMS')
+    ylabel = 'RMS (ppm)' if to_ppm else 'RMS'
+    plt.ylabel(ylabel)
     if title is not None:
         plt.title(title)
     plt.legend()
@@ -98,6 +115,7 @@ def plot_noise_binning(residuals, outpath, title=None):
     plt.savefig(outpath)
     plt.close()
     print(f"Saved noise-binning plot to {outpath}")
+
 def spot_crossing(t, amp, mu, sigma):
     return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
 
@@ -188,10 +206,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
         durations, t0s, bs, rorss = [], [], [], []
 
         for i in range(n_planets):
-            logD = numpyro.sample(f"logD_{i}", dist.Normal(jnp.log(prior_params['duration'][i]), 1e-2))
+            logD = numpyro.sample(f"logD_{i}", dist.Normal(jnp.log(prior_params['duration'][i]), 3e-2))
             durations.append(numpyro.deterministic(f"duration_{i}", jnp.exp(logD)))
 
-            t0s.append(numpyro.sample(f"t0_{i}", dist.Normal(prior_params['t0'][i], 1e-2)))
+            t0s.append(numpyro.sample(f"t0_{i}", dist.Normal(prior_params['t0'][i], 3e-2)))
 
             _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
             bs.append(numpyro.deterministic(f'b_{i}', jnp.abs(_b)))
@@ -952,7 +970,7 @@ def main():
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
             if detrending_type == 'spot':
                 whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
-
+            '''
             print(jnp.log(jnp.nanmedian(data.wl_flux_err)))
             if detrending_type == 'gp':
                 solver = jaxopt.ScipyMinimize(fun=loss)
@@ -963,7 +981,9 @@ def main():
                # init_params_wl['logs2'] = soln.params['logs2']
             #print(init_params_wl['logs2'])
             #print(jnp.min(data.wl_time), jnp.max(data.wl_time), jnp.min(data.wl_flux), jnp.max(data.wl_flux), jnp.min(data.wl_flux_err), jnp.max(data.wl_flux_err))
+            '''
             soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+            
             if detrending_type == 'spot':
                 amp0     = float(init_params_wl['spot_amp'])
                 center0  = float(init_params_wl['spot_mu'])
@@ -1143,15 +1163,15 @@ def main():
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
 
             median_error_wl = np.nanmedian(wl_samples['error'])
-            plt.plot(data.wl_time, wl_transit_model, color="r", lw=2, zorder=3)
-            plt.errorbar(data.wl_time, data.wl_flux, yerr=median_error_wl, fmt='.', c='k', ms=1)
+            plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
+            plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
 
            # plt.title('WL GP fit')
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.show()
             plt.close()
 
-            plt.errorbar(data.wl_time, wl_residual, yerr=median_error_wl, fmt='.', c='k', ms=2)
+            plt.scatter(data.wl_time, wl_residual, s=6, c='k')
             plt.axhline(0, c='r', lw=2)
             plt.axhline(3*wl_sigma, c='b', lw=2, ls='--')
             plt.axhline(-3*wl_sigma, c='b', lw=2, ls='--')
@@ -1165,7 +1185,7 @@ def main():
 
 
             #plt.plot(data.wl_time, wl_transit_model, color="C0", lw=2)
-            plt.scatter(data.wl_time, data.wl_flux, c='r', s=6)
+            plt.scatter(data.wl_time, data.wl_flux, c='mediumorchid', s=2)
             plt.scatter(data.wl_time[~wl_mad_mask], data.wl_flux[~wl_mad_mask], c='k', s=6)
             plt.title(f'Whitelight Outlier Rejection Plot (Removed = Red)')
             plt.savefig(f'{output_dir}/13_{instrument_full_str}_whitelightpostrejection.png')
@@ -1201,7 +1221,7 @@ def main():
                 detrended_flux = data.wl_flux[~wl_mad_mask] / (trend_flux + 1.0)
                 planet_model_only = compute_lc_gp_mean(bestfit_params_wl, data.wl_time[~wl_mad_mask])
 
-            plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=6)
+            plt.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=6, alpha=0.5)
             plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.show()
@@ -1926,4 +1946,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
