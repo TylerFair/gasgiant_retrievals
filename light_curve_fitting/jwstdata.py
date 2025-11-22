@@ -52,7 +52,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
     """Handle all the binning logic in one place."""
     resolution = cfg.get('resolution', None)
     pixels = cfg.get('pixels', None)
-
+    nrs = cfg.get('nrs', None)
 
     flux_unbinned_copy = flux_unbinned * 1.0
     flux_err_unbinned_copy = flux_err_unbinned * 1.0
@@ -97,6 +97,21 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
                 wavelengths, flux_transposed, flux_err_transposed, low_res, method='average'
             )
 
+        # Trim edge wavelengths for low-res based on detector
+        if nrs == 1:
+            # NRS1: clip wavelengths < 2.9 microns
+            valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
+        elif nrs == 2:
+            # NRS2: clip wavelengths > 5.0 microns
+            valid_lr = wl_lr <= 5.0
+        else:
+            valid_lr = np.ones(len(wl_lr), dtype=bool)
+
+        wl_lr = wl_lr[valid_lr]
+        wl_err_lr = wl_err_lr[valid_lr]
+        flux_lr = flux_lr[valid_lr]
+        flux_err_lr = flux_err_lr[valid_lr]
+
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
@@ -120,14 +135,39 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
                 wavelengths, flux_transposed, flux_err_transposed, high_res, method='average'
             )
-            
+
+        # Trim edge wavelengths for high-res based on detector
+        if nrs == 1:
+            # NRS1: clip wavelengths < 2.9 microns
+            valid_hr = (wl_hr >= 2.9) & (wl_hr<= 5.0)
+        elif nrs == 2:
+            # NRS2: clip wavelengths > 5.0 microns
+            valid_hr = wl_hr <= 5.0
+        else:
+            valid_hr = np.ones(len(wl_hr), dtype=bool)
+
+        wl_hr = wl_hr[valid_hr]
+        wl_err_hr = wl_err_hr[valid_hr]
+        flux_hr = flux_hr[valid_hr]
+        flux_err_hr = flux_err_hr[valid_hr]
+
         n_hr = min(len(wl_hr), flux_hr.shape[0], flux_err_hr.shape[0], len(wl_err_hr))
         wl_hr, wl_err_hr = wl_hr[:n_hr], wl_err_hr[:n_hr]
         flux_hr, flux_err_hr = flux_hr[:n_hr, :], flux_err_hr[:n_hr, :]
-    
+        print(f"\n=== BINNING DEBUG ===")
+        print(f"flux_hr shape: {flux_hr.shape}")
+        print(f"flux_hr mean per wavelength: {np.mean(flux_hr, axis=1)[:10]}")  # First 10 bins
+        print(f"flux_hr transit depth proxy: {1 - np.min(flux_hr, axis=1)[:10]}")  # Depth estimate
+
+
         flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr, norm_range=oot_mask)
         flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr, norm_range=oot_mask)
-    
+        print(f"\n=== POST-NORMALIZATION DEBUG ===")
+        print(f"flux_hr per-wavelength means: {np.mean(flux_hr, axis=1)[:10]}")
+        print(f"flux_hr per-wavelength mins: {np.min(flux_hr, axis=1)[:10]}")
+        print(f"flux_hr per-wavelength maxs: {np.max(flux_hr, axis=1)[:10]}")
+        print(f"Transit depth estimate per wavelength: {1 - np.min(flux_hr, axis=1)[:10]}")
+
         keep_wl_lr = np.isfinite(flux_lr).all(axis=1) & np.isfinite(flux_err_lr).all(axis=1)
         wl_lr, wl_err_lr = wl_lr[keep_wl_lr], wl_err_lr[keep_wl_lr]
         flux_lr, flux_err_lr = flux_lr[keep_wl_lr, :], flux_err_lr[keep_wl_lr, :]
@@ -147,7 +187,6 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         print(f"  flux_hr range: {np.nanmin(flux_hr):.6f} - {np.nanmax(flux_hr):.6f}")
         print(f"  flux_err_hr range: {np.nanmin(flux_err_hr):.6f} - {np.nanmax(flux_err_hr):.6f}")
         print(f"  flux_err_hr median: {np.nanmedian(flux_err_hr):.6f}")
-
         assert wl_lr.shape[0] == flux_lr.shape[0] == flux_err_lr.shape[0] == wl_err_lr.shape[0], "LR channels misaligned"
         assert wl_hr.shape[0] == flux_hr.shape[0] == flux_err_hr.shape[0] == wl_err_hr.shape[0], "HR channels misaligned"
     elif cfg.get('pixels', None) is not None:
@@ -173,6 +212,24 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         else:
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_pixel(
             wavelengths, flux_transposed, flux_err_transposed, pixels.get('low'))
+                  # Trim edge wavelengths based on detector
+        if nrs == 1:
+        # NRS1: clip wavelengths < 2.9 microns
+            valid_hr = (wl_hr >= 2.9) & (wl_hr <= 5.0)
+            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
+            valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
+            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
+            flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
+        elif nrs == 2:
+      # NRS2: clip wavelengths > 5.0 microns
+            valid_hr = wl_hr <= 5.0
+            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
+            valid_lr = wl_lr <= 5.0
+            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
 
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
@@ -195,7 +252,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         n_hr = min(len(wl_hr), flux_hr.shape[0], flux_err_hr.shape[0], len(wl_err_hr))
         wl_hr, wl_err_hr = wl_hr[:n_hr], wl_err_hr[:n_hr]
         flux_hr, flux_err_hr = flux_hr[:n_hr, :], flux_err_hr[:n_hr, :]
-    
+   
         flux_lr, flux_err_lr = normalize_flux(flux_lr, flux_err_lr, norm_range=oot_mask)
         flux_hr, flux_err_hr = normalize_flux(flux_hr, flux_err_hr, norm_range=oot_mask)
     
@@ -218,6 +275,10 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
         assert wl_hr.shape[0] == flux_hr.shape[0] == flux_err_hr.shape[0] == wl_err_hr.shape[0], "High Pixel channels misaligned"
     else:
         raise ValueError('Must specify pixels or resolution')
+    print('Final check')
+    print(f'Range of reference grid flux errs: {np.min(flux_err_hr)} to {np.max(flux_err_hr)}, median {np.median(flux_err_hr)}')
+    print(f'Range of manual almost matching ref grid flux errs: {np.min(flux_err_lr)} to {np.max(flux_err_lr)}, median {np.median(flux_err_lr)}')
+
     return {
         'wavelengths_lr': wl_lr, 'wavelengths_err_lr': wl_err_lr, 
         'flux_lr': flux_lr, 'flux_err_lr': flux_err_lr,
@@ -315,3 +376,5 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet=planet_str,
         mini_instrument=mini_instrument
     )
+
+
