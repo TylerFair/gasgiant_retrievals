@@ -271,7 +271,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
         elif detrend_type == 'linear_discontinuity':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
-            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(jnp.median(t), 0.1))
+            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1))
             params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1))
             lc_model = compute_lc_linear_discontinuity(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
@@ -1383,7 +1383,7 @@ def main():
             # Middle panel: Raw + best-fit model
             ax2 = fig.add_subplot(gs[0, 1])
             ax2.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
-            ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
+            ax2.plot(data.wl_time, wl_transit_model+1, color="mediumorchid", lw=2, zorder=3)
             ax2.set_title('Raw Light Curve + Best-fit Model')
             ax2.set_xlabel('Time')
             ax2.set_ylabel('Flux')
@@ -1397,13 +1397,13 @@ def main():
             ax3_top.scatter(data.wl_time[~wl_mad_mask], detrended_flux, c='k', s=6, alpha=0.5)
             # Recompute transit model only
             transit_only_model = _compute_transit_model(bestfit_params_wl, data.wl_time[~wl_mad_mask])
-            ax3_top.plot(data.wl_time[~wl_mad_mask], transit_only_model, color="mediumorchid", lw=2, zorder=3)
+            ax3_top.plot(data.wl_time[~wl_mad_mask], transit_only_model+1, color="mediumorchid", lw=2, zorder=3)
             ax3_top.set_title('Detrended Light Curve')
             ax3_top.set_ylabel('Normalized Flux')
             plt.setp(ax3_top.get_xticklabels(), visible=False)
 
             # Bottom right: Residuals
-            residuals_detrended = detrended_flux - transit_only_model
+            residuals_detrended = detrended_flux - transit_only_model - 1
             ax3_bot.scatter(data.wl_time[~wl_mad_mask], residuals_detrended, c='k', s=6, alpha=0.5)
             ax3_bot.axhline(0, color='mediumorchid', lw=2, zorder=3)
             ax3_bot.set_xlabel('Time')
