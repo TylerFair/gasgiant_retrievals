@@ -216,7 +216,7 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 def plot_wavelength_offset_summary(
     t, indiv_y, jitter, wavelengths, map_params, transit_params,
     filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
-    align_residuals_to_model=True, gp_trend=None  # keep True for vertical alignment to left panel
+    align_residuals_to_model=True, gp_trend=None, spot_trend=None, jump_trend=None
 ):
     import numpy as np
     import matplotlib.pyplot as plt
@@ -317,6 +317,15 @@ def plot_wavelength_offset_summary(
             elif detrend_type == 'quadratic':
                 v2_i = map_params['v2'][idx]
                 trend = c_i + v_i * t_shift + v2_i * t_shift**2
+            elif detrend_type == 'cubic':
+                v2_i = map_params['v2'][idx]
+                v3_i = map_params['v3'][idx]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3
+            elif detrend_type == 'quartic':
+                v2_i = map_params['v2'][idx]
+                v3_i = map_params['v3'][idx]
+                v4_i = map_params['v4'][idx]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3 + v4_i * t_shift**4
             elif detrend_type == 'linear_discontinuity':
                 t_jump_i = map_params['t_jump'][idx]
                 jump_i = map_params['jump'][idx]
