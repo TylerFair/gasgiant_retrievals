@@ -46,65 +46,48 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-def robust_std(data, axis=None):
-    """Helper to calculate Robust Sigma (1.4826 * MAD)."""
-    mad = np.nanmedian(np.abs(data - np.nanmedian(data, axis=axis, keepdims=True)), axis=axis)
-    return 1.4826 * mad
-
-def _noise_binning_stats(residuals, n_bins=50, max_bin=None, dense_mode=False):
+def _noise_binning_stats(residuals, n_bins=30, max_bin=None):
     """
-    ROBUST version of noise binning stats.
-    - Uses MAD instead of STD to ignore outliers.
-    - dense_mode=True forces integer stepping (1,2,3...) for 'paper-quality' plots.
+    residuals: array-like, shape (n_channels, n_times) or (n_times,)
+    Returns: bins, median_sigma, p16, p84, expected_white_median, expected_white_per_channel
+    - expected_white_median: sigma1_med / sqrt(bins)
+    - expected_white_per_channel: shape (n_channels, len(bins)) = sigma1_channel[:, None] / sqrt(bins)
+    Notes:
+    - For very large bin sizes that produce < 2 binned segments we return NaN so they don't bias medians.
     """
     residuals = np.array(residuals)
     if residuals.ndim == 1:
         residuals = residuals[None, :]
     n_channels, n_times = residuals.shape
-    
     if max_bin is None:
-        max_bin = max(1, n_times // 2)
-        
-    # --- Binning Strategy ---
-    if dense_mode:
-        # "Paper Quality" (Every integer step) - WARNING: Slower for many channels
-        bins = np.arange(1, max_bin + 1)
-    else:
-        # "Standard" (Log spacing, but cleaner than before)
-        bins = np.unique(np.round(np.logspace(0, np.log10(max_bin), n_bins)).astype(int))
-        
+        max_bin = max(1, n_times // 4)
+    # logarithmically spaced bin sizes between 1 and max_bin
+    bins = np.unique(np.round(np.logspace(0, np.log10(max_bin), n_bins)).astype(int))
     sigma_b_channels = np.full((n_channels, len(bins)), np.nan)
-    
-    # Calculate Unbinned Robust Sigma (The Baseline)
-    sigma1_channels = robust_std(residuals, axis=1)
-    
     for i in range(n_channels):
         r = residuals[i, :]
-        
         for j, b in enumerate(bins):
-            # Truncate to multiple of bin size
             m = (n_times // b) * b
-            if m < b * 2: # Need at least 2 bins
+            if m < b:
+                sigma_b_channels[i, j] = np.nan
                 continue
-                
             r_trunc = r[:m].reshape(-1, b)
             means = r_trunc.mean(axis=1)
-            
-            # --- ROBUST CALCULATION ---
-            # We calculate the scatter of the bins using MAD, not STD
-            sigma_b_channels[i, j] = robust_std(means)
+            # require at least 2 binned segments to compute a sensible std
+            if means.size >= 2:
+                # ddof=0 yields RMS / population std; using ddof=1 is an option
+                sigma_b_channels[i, j] = np.std(means, ddof=0)
+            else:
+                sigma_b_channels[i, j] = np.nan
 
-    # Aggregate across channels
     sigma_med = np.nanmedian(sigma_b_channels, axis=0)
     sigma_16 = np.nanpercentile(sigma_b_channels, 16, axis=0)
     sigma_84 = np.nanpercentile(sigma_b_channels, 84, axis=0)
-    
-    # Expected white noise scaling (using ROBUST baseline)
+    # expected white-noise scaling using median unbinned sigma across channels
+    sigma1_channels = np.nanstd(residuals, axis=1, ddof=0)
     sigma1_med = np.nanmedian(sigma1_channels)
-    
     expected_white_per_channel = sigma1_channels[:, None] / np.sqrt(bins)
     expected_white_median = sigma1_med / np.sqrt(bins)
-    
     return bins, sigma_med, sigma_16, sigma_84, expected_white_median, expected_white_per_channel
 
 def plot_noise_binning(residuals, outpath, title=None, to_ppm=True, show_per_channel_expected=False):
@@ -119,7 +102,7 @@ def plot_noise_binning(residuals, outpath, title=None, to_ppm=True, show_per_cha
     factor = 1e6 if to_ppm else 1.0
     plt.figure(figsize=(6,4))
     plt.loglog(bins, sigma_med * factor, 'k-o', label='Measured (median across channels)')
-    #plt.fill_between(bins, sigma_16 * factor, sigma_84 * factor, color='gray', alpha=0.3, label='16-84%')
+    plt.fill_between(bins, sigma_16 * factor, sigma_84 * factor, color='gray', alpha=0.3, label='16-84%')
     # plot median white-noise expectation
     plt.loglog(bins, expected_white_med * factor, 'r--', label='White-noise expectation (σ₁/√N)')
     if show_per_channel_expected and expected_white_pc is not None:
@@ -130,7 +113,7 @@ def plot_noise_binning(residuals, outpath, title=None, to_ppm=True, show_per_cha
     plt.ylabel(ylabel)
     if title is not None:
         plt.title(title)
-   # plt.legend()
+    plt.legend()
     plt.tight_layout()
     plt.savefig(outpath)
     plt.close()
@@ -1365,9 +1348,6 @@ def main():
                 wl_transit_model = mu
             wl_residual = data.wl_flux - wl_transit_model
 
-            dt = np.median(np.diff(data.wl_time)) * 86400  # Cadence in seconds
-            beta, bin_sizes, measured_rms, expected_rms = calculate_beta(np.array(wl_residual), dt)
-            print(f"Beta (red noise factor): {beta:.4f}")
 
             wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
 
@@ -1461,7 +1441,7 @@ def main():
             # Middle panel: Raw + best-fit model
             ax2 = fig.add_subplot(gs[0, 1])
             ax2.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
-            ax2.plot(data.wl_time, wl_transit_model+1, color="mediumorchid", lw=2, zorder=3)
+            ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             ax2.set_title('Raw Light Curve + Best-fit Model')
             ax2.set_xlabel('Time')
             ax2.set_ylabel('Flux')
@@ -1486,7 +1466,6 @@ def main():
             ax3_bot.axhline(0, color='mediumorchid', lw=2, zorder=3)
             ax3_bot.set_xlabel('Time')
             ax3_bot.set_ylabel('Residuals')
-
             dt = np.median(np.diff(data.wl_time)) * 86400  # Cadence in seconds
             beta, bin_sizes, measured_rms, expected_rms = calculate_beta(np.array(wl_residual[~wl_mad_mask]), dt)
             print(f"Beta (red noise factor): {beta:.4f}")
@@ -1560,7 +1539,7 @@ def main():
             df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
             bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-
+            exit()
 
             DURATION_BASE = bestfit_params_wl_df['duration'].values
             T0_BASE = bestfit_params_wl_df['t0'].values
@@ -1586,6 +1565,7 @@ def main():
             DEPTH_BASE = RORS_BASE**2
     else:
         print(f'Whitelight outliers and bestfit parameters already exist, skipping whitelight fit. If you want to fit whitelight please delete {output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
+        exit()
         wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
         bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
         DURATION_BASE = bestfit_params_wl_df['duration'].values
@@ -2259,5 +2239,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
