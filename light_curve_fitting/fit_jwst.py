@@ -1592,7 +1592,7 @@ def main():
             detrended_data.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_detrended.csv', index=False)
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
             if detrending_type == 'gp':
-                df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'transit_model_flux': planet_model_only})
+                df = pd.DataFrame({'wl_flux': data.wl_flux[~wl_mad_mask], 'gp_flux': mu, 'gp_err': jnp.sqrt(var), 'gp_trend': trend_flux, 'transit_model_flux': planet_model_only})
                 df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
             
             rows = []
@@ -1652,7 +1652,6 @@ def main():
             df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
             print(f'Saved whitelight parameters to {output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
             bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-            exit()
 
             DURATION_BASE = bestfit_params_wl_df['duration'].values
             T0_BASE = bestfit_params_wl_df['t0'].values
@@ -1678,7 +1677,6 @@ def main():
             DEPTH_BASE = RORS_BASE**2
     else:
         print(f'Whitelight outliers and bestfit parameters already exist, skipping whitelight fit. If you want to fit whitelight please delete {output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
-        exit()
         wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
         bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
         DURATION_BASE = bestfit_params_wl_df['duration'].values
@@ -1723,7 +1721,7 @@ def main():
 
         if detrending_type == 'gp':
             gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-            gp_trend = jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
+            gp_trend = jnp.array(gp_df['gp_trend'].values) #jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
             detrend_type_multiwave = 'gp_spectroscopic'
         elif detrending_type == 'spot':
             detrend_type_multiwave = 'spot_spectroscopic'
@@ -2056,7 +2054,7 @@ def main():
 
     if detrending_type == 'gp':
         gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-        gp_trend = jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
+        gp_trend = jnp.array(gp_df['gp_trend'].values) #jnp.array(gp_df['gp_flux'].values - gp_df['transit_model_flux'].values)
         detrend_type_multiwave = 'gp_spectroscopic'
     elif detrending_type == 'spot':
         detrend_type_multiwave = 'spot_spectroscopic'
