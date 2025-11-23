@@ -169,6 +169,20 @@ def compute_lc_quadratic(params, t):
     trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2
     return lc_transit + trend
 
+def compute_lc_cubic(params, t):
+    """Computes transit + cubic trend."""
+    lc_transit = _compute_transit_model(params, t)
+    t_norm = t - jnp.min(t)
+    trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2 + params["v3"] * t_norm**3
+    return lc_transit + trend
+
+def compute_lc_quartic(params, t):
+    """Computes transit + quartic trend."""
+    lc_transit = _compute_transit_model(params, t)
+    t_norm = t - jnp.min(t)
+    trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2 + params["v3"] * t_norm**3 + params["v4"] * t_norm**4
+    return lc_transit + trend
+
 def compute_lc_linear_discontinuity(params, t):
     """Computes transit + linear trend with a discontinuity."""
     lc_transit = _compute_transit_model(params, t)
@@ -269,6 +283,23 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             lc_model = compute_lc_quadratic(params, t)
             numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
 
+        elif detrend_type == 'cubic':
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1))
+            params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1))
+            lc_model = compute_lc_cubic(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
+
+        elif detrend_type == 'quartic':
+            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1))
+            params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1))
+            params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1))
+            lc_model = compute_lc_quartic(params, t)
+            numpyro.sample('obs', dist.Normal(lc_model, error), obs=y)
+
         elif detrend_type == 'linear_discontinuity':
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
             params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
@@ -323,6 +354,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         compute_lc_kernel = compute_lc_linear
     elif detrend_type == 'quadratic':
         compute_lc_kernel = compute_lc_quadratic
+    elif detrend_type == 'cubic':
+        compute_lc_kernel = compute_lc_cubic
+    elif detrend_type == 'quartic':
+        compute_lc_kernel = compute_lc_quartic
     elif detrend_type == 'linear_discontinuity':
         compute_lc_kernel = compute_lc_linear_discontinuity
     elif detrend_type == 'explinear':
@@ -388,6 +423,15 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 if detrend_type == 'quadratic':
                     params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
                     in_axes.update({'v2': 0})
+                elif detrend_type == 'cubic':
+                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    in_axes.update({'v2': 0, 'v3': 0})
+                elif detrend_type == 'quartic':
+                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
 
                 if detrend_type == 'linear_discontinuity':
                     params['t_jump'] = numpyro.sample('t_jump', dist.Normal(jnp.median(t), 0.1).expand([num_lcs]))
@@ -412,6 +456,15 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 if detrend_type == 'quadratic':
                     params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
                     in_axes.update({'v2': 0})
+                elif detrend_type == 'cubic':
+                    params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
+                    params['v3'] = numpyro.deterministic('v3', trend_temp[:, 3])
+                    in_axes.update({'v2': 0, 'v3': 0})
+                elif detrend_type == 'quartic':
+                    params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
+                    params['v3'] = numpyro.deterministic('v3', trend_temp[:, 3])
+                    params['v4'] = numpyro.deterministic('v4', trend_temp[:, 4])
+                    in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
                 elif detrend_type == 'linear_discontinuity':
                     params['t_jump'] = numpyro.deterministic('t_jump', trend_temp[:, 2])
                     params['jump'] = numpyro.deterministic('jump', trend_temp[:, 3])
@@ -807,6 +860,15 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
             elif detrend_type == 'quadratic':
                 v2_i = map_params['v2'][i]
                 trend = c_i + v_i * t_shift + v2_i * t_shift**2
+            elif detrend_type == 'cubic':
+                v2_i = map_params['v2'][i]
+                v3_i = map_params['v3'][i]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3
+            elif detrend_type == 'quartic':
+                v2_i = map_params['v2'][i]
+                v3_i = map_params['v3'][i]
+                v4_i = map_params['v4'][i]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3 + v4_i * t_shift**4
             elif detrend_type == 'linear_discontinuity':
                 t_jump_i = map_params['t_jump'][i]
                 jump_i = map_params['jump'][i]
@@ -1070,6 +1132,8 @@ def main():
     COMPUTE_KERNELS = {
     'linear': compute_lc_linear,
     'quadratic': compute_lc_quadratic,
+    'cubic': compute_lc_cubic,
+    'quartic': compute_lc_quartic,
     'linear_discontinuity': compute_lc_linear_discontinuity,
     'explinear': compute_lc_explinear,
     'spot': compute_lc_spot,
@@ -1121,6 +1185,13 @@ def main():
 
             if detrending_type == 'quadratic':
                 init_params_wl['v2'] = 0.0
+            elif detrending_type == 'cubic':
+                init_params_wl['v2'] = 0.0
+                init_params_wl['v3'] = 0.0
+            elif detrending_type == 'quartic':
+                init_params_wl['v2'] = 0.0
+                init_params_wl['v3'] = 0.0
+                init_params_wl['v4'] = 0.0
             if detrending_type == 'linear_discontinuity':
                 init_params_wl['t_jump'] = jnp.median(data.wl_time)
                 init_params_wl['jump'] = 0.0
@@ -1144,23 +1215,41 @@ def main():
                 print("This script will prompt you once the whitelight")
                 print("is finished to exit the script (your GP will be saved). Happy fitting!")
 
-
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
             if detrending_type == 'spot':
                 whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
-            '''
-            print(jnp.log(jnp.nanmedian(data.wl_flux_err)))
             if detrending_type == 'gp':
-                solver = jaxopt.ScipyMinimize(fun=loss)
-                init_params = jax.tree_util.tree_map(jnp.asarray, init_params_wl|hyper_params_wl)
-                soln = solver.run(init_params, data.wl_time, data.wl_flux, data.wl_flux_err)
-                init_params_wl['GP_log_sigma'] = soln.params['GP_log_sigma']
-                init_params_wl['GP_log_rho'] = soln.params['GP_log_rho']
-               # init_params_wl['logs2'] = soln.params['logs2']
-            #print(init_params_wl['logs2'])
-            #print(jnp.min(data.wl_time), jnp.max(data.wl_time), jnp.min(data.wl_flux), jnp.max(data.wl_flux), jnp.min(data.wl_flux_err), jnp.max(data.wl_flux_err))
-            '''
-            soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+                print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
+                whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
+    
+                init_params_prefit = init_params_wl.copy()
+                init_params_prefit.pop('GP_log_sigma', None)
+                init_params_prefit.pop('GP_log_rho', None)
+    
+                soln_prefit = optimx.optimize(whitelight_model_prefit, start=init_params_prefit)(
+                    key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
+                )
+    
+                print("--- Initializing GP with Pre-Fit Parameters ---")
+                for k in soln_prefit.keys():
+                    if k in init_params_wl:
+                        init_params_wl[k] = soln_prefit[k]
+    
+                if detrending_type == 'gp':
+                    print("Please make sure config is CPU for GP whitelight fit!")
+    
+                    init_params_wl['GP_log_sigma'] = jnp.log(5.0 * jnp.nanmedian(data.wl_flux_err))
+    
+                    init_params_wl['GP_log_rho'] = jnp.log(0.1)
+    
+                    whitelight_model_for_run = create_whitelight_model(detrend_type='gp', n_planets=n_planets)
+    
+                    # Now run the optimization using the GOOD starting point
+                    soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(
+                        key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
+                    )
+            else:
+                soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             
             if detrending_type == 'spot':
                 amp0     = float(init_params_wl['spot_amp'])
@@ -1297,6 +1386,13 @@ def main():
                 bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v']) if detrending_type != 'gp' else 0.0
             if detrending_type == 'quadratic':
                 bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
+            elif detrending_type == 'cubic':
+                bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
+                bestfit_params_wl['v3'] = jnp.nanmedian(wl_samples['v3'])
+            elif detrending_type == 'quartic':
+                bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
+                bestfit_params_wl['v3'] = jnp.nanmedian(wl_samples['v3'])
+                bestfit_params_wl['v4'] = jnp.nanmedian(wl_samples['v4'])
             if detrending_type == 'linear_discontinuity':
                 bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
                 bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
@@ -1324,6 +1420,10 @@ def main():
                 wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'quadratic':
                 wl_transit_model = compute_lc_quadratic(bestfit_params_wl, data.wl_time)
+            elif detrending_type == 'cubic':
+                wl_transit_model = compute_lc_cubic(bestfit_params_wl, data.wl_time)
+            elif detrending_type == 'quartic':
+                wl_transit_model = compute_lc_quartic(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'linear_discontinuity':
                 wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'explinear':
@@ -1391,6 +1491,12 @@ def main():
             elif detrending_type == 'quadratic':
                 t_norm = data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])
                 detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm + bestfit_params_wl["v2"] * t_norm**2)
+            elif detrending_type == 'cubic':
+                t_norm = data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])
+                detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm + bestfit_params_wl["v2"] * t_norm**2 + bestfit_params_wl["v3"] * t_norm**3)
+            elif detrending_type == 'quartic':
+                t_norm = data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])
+                detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm + bestfit_params_wl["v2"] * t_norm**2 + bestfit_params_wl["v3"] * t_norm**3 + bestfit_params_wl["v4"] * t_norm**4)
             elif detrending_type == 'linear_discontinuity':
                 jump = jnp.where(data.wl_time[~wl_mad_mask] > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
                 detrended_flux = 1.0 + data.wl_flux[~wl_mad_mask] - (bestfit_params_wl["c"] + bestfit_params_wl["v"] * (data.wl_time[~wl_mad_mask] - jnp.min(data.wl_time[~wl_mad_mask])) + jump)
@@ -1521,6 +1627,13 @@ def main():
                     row['tau'] = bestfit_params_wl['tau']
                 elif detrending_type == 'quadratic':
                     row['v2'] = bestfit_params_wl['v2']
+                elif detrending_type == 'cubic':
+                    row['v2'] = bestfit_params_wl['v2']
+                    row['v3'] = bestfit_params_wl['v3']
+                elif detrending_type == 'quartic':
+                    row['v2'] = bestfit_params_wl['v2']
+                    row['v3'] = bestfit_params_wl['v3']
+                    row['v4'] = bestfit_params_wl['v4']
                 elif detrending_type == 'linear_discontinuity':
                     row['t_jump'] = bestfit_params_wl['t_jump']
                     row['jump'] = bestfit_params_wl['jump']
@@ -1594,7 +1707,8 @@ def main():
     best_poly_coeffs_spot_amp = None
     best_poly_coeffs_spot_mu = None
     best_poly_coeffs_spot_sigma = None
-
+    spot_trend = None
+    jump_trend = None
 
 
     # --- Low-resolution Analysis ---
