@@ -7,7 +7,7 @@ from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 import jax.numpy as jnp
 
-def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
+def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear', gp_trend=None, spot_trend=None, jump_trend=None):
     """
     Plot the MAP fits for each wavelength. The transit parameters (period, duration, 
     impact parameter, and transit time) are provided via transit_params, and detrend_offset 
@@ -50,32 +50,41 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
             total_model_flux += planet_model
 
         model = total_model_flux 
+        t_norm = t - jnp.min(t)
 
         if detrend_type == 'linear':
-            trend = c_i + v_i * (t - jnp.min(t))
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm
         elif detrend_type == 'quadratic':
-            v2_i = map_params['v2'][i]
-            t_norm = t - jnp.min(t)
-            trend = c_i + v_i * t_norm + v2_i * t_norm**2
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2
+        elif detrend_type == 'cubic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['v3'][i] * t_norm**3
+        elif detrend_type == 'quartic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['v3'][i] * t_norm**3 + map_params['v4'][i] * t_norm**4
         elif detrend_type == 'linear_discontinuity':
-            t_jump_i = map_params['t_jump'][i]
-            jump_i = map_params['jump'][i]
-            jump = jnp.where(t > t_jump_i, jump_i, 0.0)
-            trend = c_i + v_i * (t - jnp.min(t)) + jump
+            jump = jnp.where(t > map_params['t_jump'][i], map_params['jump'][i], 0.0)
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + jump
         elif detrend_type == 'explinear':
-            A_i = map_params['A'][i]
-            tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A'][i] * jnp.exp(-t_norm / map_params['tau'][i])
         elif detrend_type == 'spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+            spot = map_params['spot_amp'][i] * jnp.exp(-0.5 * (t - map_params['spot_mu'][i])**2 / map_params['spot_sigma'][i]**2)
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + spot
+        elif detrend_type == 'gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'linear+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'quadratic+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'explinear+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A'][i] * jnp.exp(-t_norm / map_params['tau'][i]) + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'spot_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_spot'][i] * spot_trend
+        elif detrend_type == 'linear_discontinuity_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_jump'][i] * jump_trend
         elif detrend_type == 'none':
             trend = 1.0
         else:
-            raise ValueError(f"Unknown detrend_type: {detrend_type}")
-            
+            raise ValueError(f"Unknown detrend_type for plotting: {detrend_type}")
+
         model = model + trend      
         ax.errorbar(t, indiv_y[i], yerr=jitter[i], fmt='.', alpha=0.3,
                     color=colors[i], label='Data', ms=1, zorder=2)
@@ -91,7 +100,7 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
     return fig
 
 
-def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
+def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear', gp_trend=None, spot_trend=None, jump_trend=None):
     """
     Plot the residuals for each wavelength using the transit parameters provided via transit_params.
     """
@@ -130,31 +139,41 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
             total_model_flux += planet_model
 
         model = total_model_flux 
+        t_norm = t - jnp.min(t)
+
         if detrend_type == 'linear':
-            trend = c_i + v_i * (t - jnp.min(t))
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm
         elif detrend_type == 'quadratic':
-            v2_i = map_params['v2'][i]
-            t_norm = t - jnp.min(t)
-            trend = c_i + v_i * t_norm + v2_i * t_norm**2
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2
+        elif detrend_type == 'cubic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['v3'][i] * t_norm**3
+        elif detrend_type == 'quartic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['v3'][i] * t_norm**3 + map_params['v4'][i] * t_norm**4
         elif detrend_type == 'linear_discontinuity':
-            t_jump_i = map_params['t_jump'][i]
-            jump_i = map_params['jump'][i]
-            jump = jnp.where(t > t_jump_i, jump_i, 0.0)
-            trend = c_i + v_i * (t - jnp.min(t)) + jump
+            jump = jnp.where(t > map_params['t_jump'][i], map_params['jump'][i], 0.0)
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + jump
         elif detrend_type == 'explinear':
-            A_i = map_params['A'][i]
-            tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A'][i] * jnp.exp(-t_norm / map_params['tau'][i])
         elif detrend_type == 'spot':
-            spot_amp = map_params['spot_amp'][i]
-            spot_mu = map_params['spot_mu'][i]
-            spot_sigma = map_params['spot_sigma'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+            spot = map_params['spot_amp'][i] * jnp.exp(-0.5 * (t - map_params['spot_mu'][i])**2 / map_params['spot_sigma'][i]**2)
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + spot
+        elif detrend_type == 'gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'linear+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'quadratic+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['v2'][i] * t_norm**2 + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'explinear+gp_spectroscopic':
+            trend = map_params['c'][i] + map_params['v'][i] * t_norm + map_params['A'][i] * jnp.exp(-t_norm / map_params['tau'][i]) + map_params['A_gp'][i] * gp_trend
+        elif detrend_type == 'spot_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_spot'][i] * spot_trend
+        elif detrend_type == 'linear_discontinuity_spectroscopic':
+            trend = map_params['c'][i] + map_params['A_jump'][i] * jump_trend
         elif detrend_type == 'none':
             trend = 1.0
         else:
-            raise ValueError(f"Unknown detrend_type: {detrend_type}")
-            
+            raise ValueError(f"Unknown detrend_type for plotting: {detrend_type}")
+
         model = model + trend
         residuals = indiv_y[i] - model
         
@@ -295,53 +314,40 @@ def plot_wavelength_offset_summary(
 
         model_transit = total_model_flux
 
+        t_norm = t - np.min(t)
         # Detrend model
-        if detrend_type == 'gp_spectroscopic':
-            c_i = map_params['c'][idx]
-            A_gp_i = map_params['A_gp'][idx]
-            trend = c_i + A_gp_i * gp_trend
+        if detrend_type == 'linear':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm
+        elif detrend_type == 'quadratic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['v2'][idx] * t_norm**2
+        elif detrend_type == 'cubic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['v2'][idx] * t_norm**2 + map_params['v3'][idx] * t_norm**3
+        elif detrend_type == 'quartic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['v2'][idx] * t_norm**2 + map_params['v3'][idx] * t_norm**3 + map_params['v4'][idx] * t_norm**4
+        elif detrend_type == 'linear_discontinuity':
+            jump = jnp.where(t > map_params['t_jump'][idx], map_params['jump'][idx], 0.0)
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + jump
+        elif detrend_type == 'explinear':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['A'][idx] * np.exp(-t_norm / map_params['tau'][idx])
+        elif detrend_type == 'spot':
+            spot = map_params['spot_amp'][idx] * np.exp(-0.5 * (t - map_params['spot_mu'][idx])**2 / map_params['spot_sigma'][idx]**2)
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + spot
+        elif detrend_type == 'gp_spectroscopic':
+            trend = map_params['c'][idx] + map_params['A_gp'][idx] * gp_trend
+        elif detrend_type == 'linear+gp_spectroscopic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['A_gp'][idx] * gp_trend
+        elif detrend_type == 'quadratic+gp_spectroscopic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['v2'][idx] * t_norm**2 + map_params['A_gp'][idx] * gp_trend
+        elif detrend_type == 'explinear+gp_spectroscopic':
+            trend = map_params['c'][idx] + map_params['v'][idx] * t_norm + map_params['A'][idx] * np.exp(-t_norm / map_params['tau'][idx]) + map_params['A_gp'][idx] * gp_trend
         elif detrend_type == 'spot_spectroscopic':
-            c_i = map_params['c'][idx]
-            A_spot_i = map_params['A_spot'][idx]
-            trend = c_i + A_spot_i * spot_trend
+            trend = map_params['c'][idx] + map_params['A_spot'][idx] * spot_trend
         elif detrend_type == 'linear_discontinuity_spectroscopic':
-            c_i = map_params['c'][idx]
-            A_jump_i = map_params['A_jump'][idx]
-            trend = c_i + A_jump_i * jump_trend
-        elif detrend_type != 'none':
-            c_i = map_params['c'][idx]
-            v_i = map_params['v'][idx]
-            t_shift = t - np.min(t)
-            if detrend_type == 'linear':
-                trend = c_i + v_i * t_shift
-            elif detrend_type == 'quadratic':
-                v2_i = map_params['v2'][idx]
-                trend = c_i + v_i * t_shift + v2_i * t_shift**2
-            elif detrend_type == 'cubic':
-                v2_i = map_params['v2'][idx]
-                v3_i = map_params['v3'][idx]
-                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3
-            elif detrend_type == 'quartic':
-                v2_i = map_params['v2'][idx]
-                v3_i = map_params['v3'][idx]
-                v4_i = map_params['v4'][idx]
-                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3 + v4_i * t_shift**4
-            elif detrend_type == 'linear_discontinuity':
-                t_jump_i = map_params['t_jump'][idx]
-                jump_i = map_params['jump'][idx]
-                jump = jnp.where(t > t_jump_i, jump_i, 0.0)
-                trend = c_i + v_i * t_shift + jump
-            elif detrend_type == 'explinear':
-                A_i = map_params['A'][idx]
-                tau_i = map_params['tau'][idx]
-                trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
-            elif detrend_type == 'spot':
-                spot_amp = map_params['spot_amp'][idx]
-                spot_mu = map_params['spot_mu'][idx]
-                spot_sig = map_params['spot_sigma'][idx]
-                trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
-        else:
+            trend = map_params['c'][idx] + map_params['A_jump'][idx] * jump_trend
+        elif detrend_type == 'none':
             trend = 1.0
+        else:
+            raise ValueError(f"Unknown detrend_type for plotting: {detrend_type}")
 
         full_model = model_transit + trend
         resid = indiv_y[idx] - full_model
@@ -393,4 +399,5 @@ def plot_wavelength_offset_summary(
     plt.tight_layout()
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     return fig
+
 
