@@ -302,7 +302,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
         if 'quartic' in detrend_components:
             params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1))
         if 'linear_discontinuity' in detrend_components:
-            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1))
+            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1))
         if 'explinear' in detrend_components:
             params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
@@ -449,7 +449,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
 
                 if detrend_type == 'linear_discontinuity':
-                    params['t_jump'] = numpyro.sample('t_jump', dist.Normal(jnp.median(t), 0.1).expand([num_lcs]))
+                    params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1).expand([num_lcs]))
                     params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1).expand([num_lcs]))
                     in_axes.update({'t_jump': 0, 'jump': 0})
 
@@ -1073,7 +1073,9 @@ def main():
     # ----------------------------------------------------
     if not stringcheck or ('gp' in detrending_type):
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
-            
+            plt.scatter(data.wl_time, data.wl_flux)
+            plt.savefig('stuff.png')
+            plt.close()
             print('Fitting whitelight for outliers and bestfit parameters')
             hyper_params_wl = {
                 "duration": PRIOR_DUR,
@@ -1108,9 +1110,16 @@ def main():
             if 'gp' in detrending_type:
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_rho'] = jnp.log(1)
-
+            if 'linear_discontinuity' in detrending_type:
+                init_params_wl['t_jump'] = 59791.12
+                init_params_wl['jump'] = -0.001 
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
-    
+            
+            # Special logic for Spot Sliding Window - only if purely spot model
+            if detrending_type == 'spot':
+                whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets) # Temp
+                # ... [Slider code omitted for brevity as it was specific to pure spot] ...
+
             if 'gp' in detrending_type:
                 print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
                 whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
@@ -1133,7 +1142,6 @@ def main():
                 )
             else:
                 soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
-
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(whitelight_model_for_run, regularize_mass_matrix=False, init_strategy=numpyro.infer.init_to_value(values=soln), target_accept_prob=0.9),
                 num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True
@@ -1201,7 +1209,10 @@ def main():
                 bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
                 bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
                 bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
-            
+            if 'linear_discontinuity' in detrending_type:
+                bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
+                bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
+    
             # FIX: Correct GP parameter extraction
             if 'gp' in detrending_type:
                 bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
@@ -1351,139 +1362,122 @@ def main():
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.close()
 
-# ----------------------------------------------------
-            # 15_ SUMMARY PLOT (Modified Layout 3:3:2:1)
-            # ----------------------------------------------------
-            # We increase height to accommodate 4 logical panels
-            fig = plt.figure(figsize=(12, 14)) 
             
-            # 1. Define Main Grid: 3 Rows of equal height
-            #    Row 0: Raw
-            #    Row 1: Raw + Model
-            #    Row 2: Container for Detrended + Residuals
-            gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=[1, 1, 1], hspace=0.3)
+            # ----------------------------------------------------
+            # 15_ SUMMARY PLOT (3x2 Grid Layout)
+            # ----------------------------------------------------
+            fig = plt.figure(figsize=(16, 14))
 
-            # --- Row 1: Raw Light Curve ---
-            ax1 = fig.add_subplot(gs[0])
+            # Define Main Grid: 3 Rows x 2 Columns
+            # Column 1: Light curve panels
+            # Column 2: Beta analysis panels
+            gs = gridspec.GridSpec(3, 2, figure=fig, height_ratios=[1, 1, 1.5], 
+                                   width_ratios=[1, 1], hspace=0.3, wspace=0.3)
+
+            # --- Column 1, Row 1: Raw Light Curve ---
+            ax1 = fig.add_subplot(gs[0, 0])
             ax1.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
             ax1.set_title('Raw Light Curve', fontsize=14)
             ax1.set_ylabel('Flux', fontsize=12)
-            ax1.tick_params(labelbottom=False) # Optional: hide x-ticks if you want to declutter
+            ax1.tick_params(labelbottom=False)
 
-            # --- Row 2: Raw Light Curve + Best-fit Model ---
-            ax2 = fig.add_subplot(gs[1], sharex=ax1)
+            # --- Column 1, Row 2: Raw Light Curve + Best-fit Model ---
+            ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
             ax2.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
             ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
             ax2.set_ylabel('Flux', fontsize=12)
-            
-            # --- Row 3: Nested Grid (Detrended [2] + Residuals [1]) ---
-            # We create a sub-grid inside the 3rd slot (gs[2])
+            ax2.tick_params(labelbottom=False)
+
+            # --- Column 1, Row 3: Nested Grid (Detrended + Residuals) ---
             gs_nested = gridspec.GridSpecFromSubplotSpec(
-                2, 1, subplot_spec=gs[2], 
-                height_ratios=[2, 1], # This gives the 2:1 ratio
-                hspace=0.0 # Join them vertically
+                2, 1, subplot_spec=gs[2, 0], 
+                height_ratios=[2, 1],
+                hspace=0.0
             )
 
-            # 3a. Detrended Light Curve (Top of nested)
+            # Detrended Light Curve (Top of nested)
             ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
             transit_only_model = _compute_transit_model(bestfit_params_wl, t_masked) + 1.0
-            
+
             ax3_top.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5, label='Detrended Data')
             ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
-            
+
             ax3_top.set_ylabel('Normalized Flux', fontsize=12)
-            ax3_top.set_title('Detrended Light Curve + Residuals', fontsize=14)
-            
-            # Hide x-labels on the detrended plot so they don't clash with residuals
+            ax3_top.set_title('Detrended Light Curve', fontsize=14)
             plt.setp(ax3_top.get_xticklabels(), visible=False)
 
-            # 3b. Residuals (Bottom of nested)
+            # Residuals (Bottom of nested)
             ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
-            
-            # Calculate residuals
             residuals_detrended = detrended_flux - transit_only_model 
-            
-            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=6, alpha=0.5) # ppm suggested, or remove 1e6 for flux
+
+            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=6, alpha=0.5)
             ax3_bot.axhline(0, color='mediumorchid', lw=2, zorder=3, linestyle='--')
-            
+
             ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
             ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
 
-            # Align y-labels (optional, helps aesthetics)
-            fig.align_ylabels([ax1, ax2, ax3_top, ax3_bot])
-
-            plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
-            plt.close(fig)
-
             # ----------------------------------------------------
-            # 16_ BETA CALCULATION & PLOT
+            # BETA CALCULATION
             # ----------------------------------------------------
             dt = np.median(np.diff(data.wl_time)) * 86400 
             residuals_arr = np.array(wl_residual[~wl_mad_mask])
 
-            # 1. Real Data
+            # Calculate beta metrics
             beta, bin_sizes_min, measured_rms, expected_rms = calculate_beta_metrics(residuals_arr, dt)
-
-            # 2. Monte Carlo
             mc_betas, rms_lo_1, rms_hi_1, rms_lo_2, rms_hi_2 = run_beta_monte_carlo(residuals_arr, dt, n_sims=500)
 
-            print(f"Beta: {beta:.4f}")
-
             mu_sim, std_sim = norm.fit(mc_betas)
-        
-
-            # 2. Calculate Z-score (How many sigmas is our Beta away from the mean?)
             z_score = (beta - mu_sim) / std_sim
 
+            print(f"Beta: {beta:.4f}")
             print(f"Measured Beta: {beta:.3f}")
             print(f"MC Mean Beta:  {mu_sim:.3f}")
             print(f"MC Std Dev:    {std_sim:.3f}")
             print(f"Significance:  {z_score:.2f} sigma")
 
-            # -------------------------------------------------------------------------
-            # PLOTTING
-            # -------------------------------------------------------------------------
-            fig_beta, (ax_b1, ax_b2) = plt.subplots(1, 2, figsize=(14, 6))
+            # --- Column 2, Rows 1-2: RMS vs Bin Size (spans 1.5 rows) ---
+            ax_rms = fig.add_subplot(gs[0:2, 1])
+            ax_rms.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
+            ax_rms.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
+            ax_rms.fill_between(bin_sizes_min, rms_lo_1 * 1e6, rms_hi_1 * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
+            ax_rms.loglog(bin_sizes_min, measured_rms * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={beta:.2f})')
+            ax_rms.set_xlabel('Bin Size (minutes)', fontsize=12)
+            ax_rms.set_ylabel('RMS (ppm)', fontsize=12)
+            ax_rms.set_title('Time-Correlated Noise', fontsize=14)
+            ax_rms.grid(True, which="both", alpha=0.2)
 
-            # --- LEFT PANEL (RMS) ---
-            # (Same as before)
-            ax_b1.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
-            ax_b1.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
-            ax_b1.fill_between(bin_sizes_min, rms_lo_1 * 1e6, rms_hi_1 * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
-            ax_b1.loglog(bin_sizes_min, measured_rms * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={beta:.2f})')
-            ax_b1.set_xlabel('Bin Size (minutes)')
-            ax_b1.set_ylabel('RMS (ppm)')
-            ax_b1.legend(loc='lower left')
-            ax_b1.grid(True, which="both", alpha=0.2)
+            # --- Column 2, Row 3: Beta Factor Histogram (spans 1.5 rows) ---
+            ax_beta = fig.add_subplot(gs[2, 1])
 
-            # --- RIGHT PANEL (GAUSSIAN FIT & SIGMA) ---
-            # 1. Plot the Histogram
-            n, bins, patches = ax_b2.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
+            # Plot histogram
+            n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
 
-            # 2. Plot the Fitted Gaussian Curve
-            xmin, xmax = ax_b2.get_xlim()
+            # Plot Gaussian fit
+            xmin, xmax = ax_beta.get_xlim()
             x_plot = np.linspace(xmin, xmax, 100)
             p_plot = norm.pdf(x_plot, mu_sim, std_sim)
-            ax_b2.plot(x_plot, p_plot, 'k--', linewidth=2, label=f'Gaussian Fit')
+            ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
 
-            # 3. Plot Your Measured Beta
-            ax_b2.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
+            # Plot measured beta
+            ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
 
-            # 4. Add the "Plausible Deniability" Text
-            # Color code the text: Green if < 2 sigma, Red if > 3 sigma
+            # Add significance text
             sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
-            ax_b2.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
-                       transform=ax_b2.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
+            ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
+                       transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
 
-            ax_b2.set_xlabel('Beta Factor')
-            ax_b2.set_ylabel('Probability Density')
-            ax_b2.set_title("Beta Significance Test")
-            ax_b2.legend(loc='upper left')
+            ax_beta.set_xlabel('Beta Factor', fontsize=12)
+            ax_beta.set_ylabel('Probability Density', fontsize=12)
+            ax_beta.set_title("Beta Significance Test", fontsize=14)
 
             plt.tight_layout()
-            plt.savefig(f'{output_dir}/16_{instrument_full_str}_beta_analysis.png')
-            plt.close(fig_beta)
+            plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
+            plt.close(fig)
+
+
+
+            exit()
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
             
             if 'gp' in detrending_type:
