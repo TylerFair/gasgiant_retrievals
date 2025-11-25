@@ -326,24 +326,24 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     flux_unbinned, flux_err_unbinned = flux_unbinned[:, ~nanmask], flux_err_unbinned[:, ~nanmask]
 
     # Apply time masking criteria (useful for spot-crossings)
-    if mask_end:
-        if mask_start == False:
-            raise print('Time mask for end time supplied but missing start time! Please give mask_start')
-    if mask_start:
-        if mask_end == False:
-            raise print('Time mask for start time supplied but missing end time! Please give mask_end')
+    if mask_start is not None and mask_end is None:
+        raise ValueError('Time mask start supplied but missing end time! Please give mask_end')
+    if mask_end is not None and mask_start is None:
+        raise ValueError('Time mask end supplied but missing start time! Please give mask_start')
+    
+    if mask_start is not None and mask_end is not None:
         if hasattr(mask_start, '__len__'):
+            # Multiple time ranges to mask
             timemask = np.zeros_like(time, dtype=bool)
             for start, end in zip(mask_start, mask_end):
                 timemask |= (time >= start) & (time <= end)
-            time = time[~timemask]
-            flux_unbinned = flux_unbinned[~timemask, :]
-            flux_err_unbinned = flux_err_unbinned[~timemask, :]
-        else: 
+        else:
+            # Single time range to mask
             timemask = (time >= mask_start) & (time <= mask_end)
-            time = time[~timemask]
-            flux_unbinned = flux_unbinned[~timemask, :]
-            flux_err_unbinned = flux_err_unbinned[~timemask, :]
+        
+        time = time[~timemask]
+        flux_unbinned = flux_unbinned[~timemask, :]
+        flux_err_unbinned = flux_err_unbinned[~timemask, :]
             
     planet_cfg = cfg['planet']
     prior_t0s = np.atleast_1d(planet_cfg['t0'])
