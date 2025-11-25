@@ -1273,8 +1273,11 @@ def main():
                 wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'none':
                 wl_transit_model = compute_lc_none(bestfit_params_wl, data.wl_time)
+            elif detrending_type == 'linear_discontinuity':
+                wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
             else:
-                wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time) # fallback
+                 print('Error with model, not defined!')
+                 exit()
 
             wl_residual = data.wl_flux - wl_transit_model
             wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
