@@ -1201,6 +1201,9 @@ def main():
                 bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
                 bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
                 bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
+            if 'linear_discontinuity' in detrending_type:
+                bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
+                bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
             
             # FIX: Correct GP parameter extraction
             if 'gp' in detrending_type:
