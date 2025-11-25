@@ -290,19 +290,27 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
 def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg, fits_file, mask_start=None, mask_end=None, mask_integrations_start=None, mask_integrations_end=None):
     """Main function to process spectroscopy data."""
     # Unpack data based on instrument
+    wl_filt_cfg = cfg.get('wavelength_filter', {})
+    wl_min = wl_filt_cfg.get('wl_min')
+    wl_max = wl_filt_cfg.get('wl_max')
+    wl_min_o1 = wl_filt_cfg.get('wl_min_o1')
+    wl_max_o1 = wl_filt_cfg.get('wl_max_o1')
+    wl_min_o2 = wl_filt_cfg.get('wl_min_o2')
+    wl_max_o2 = wl_filt_cfg.get('wl_max_o2')
+
     if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM':
         nrs = cfg['nrs']
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument, mask_integrations_start, mask_integrations_end)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
         mini_instrument = nrs
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order, mask_integrations_start, mask_integrations_end)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2)
         mini_instrument = order
     elif instrument == 'MIRI/LRS':
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_miri_exoted(fits_file, mask_integrations_start, mask_integrations_end)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_miri_exoted(fits_file, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
         mini_instrument = '' 
     else:
         raise NotImplementedError(f'Instrument {instrument} not implemented yet')

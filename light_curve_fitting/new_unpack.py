@@ -89,7 +89,7 @@ def unpack_nirspec_eureka(file_pattern, nrs, planet_str, output_dir, bins_wanted
     return wavelengths, t, indiv_y, None
 
 
-def unpack_niriss_exoted(infile, order, trim_start, trim_end):    
+def unpack_niriss_exoted(infile, order, trim_start, trim_end, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None):
 
     bjd = fits.getdata(infile, 9)
     wave = fits.getdata(infile, 1 + 4 * (order - 1))
@@ -114,6 +114,16 @@ def unpack_niriss_exoted(infile, order, trim_start, trim_end):
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
 
+    if wl_min_o1 is not None and wl_max_o1 is not None and order == 1:
+        ii = np.where((wave >= wl_min_o1) & (wave <= wl_max_o1))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
+    if wl_min_o2 is not None and wl_max_o2 is not None and order == 2:
+        ii = np.where((wave >= wl_min_o2) & (wave <= wl_max_o2))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
     wavelength = wave
     wavelength_err = wave_err
     t = np.array(bjd)
@@ -122,7 +132,7 @@ def unpack_niriss_exoted(infile, order, trim_start, trim_end):
 
     return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
-def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end):    
+def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None):
 
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
@@ -147,6 +157,11 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end):
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
     
+    if wl_min is not None and wl_max is not None:
+        ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
     wavelength = wave
     wavelength_err = wave_err
     t = np.array(bjd)
@@ -154,7 +169,7 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end):
     fluxcube_err = np.array(fluxcube_err)
     return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
 
-def unpack_miri_exoted(infile, trim_start, trim_end):
+def unpack_miri_exoted(infile, trim_start, trim_end, wl_min=None, wl_max=None):
 
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
@@ -181,6 +196,11 @@ def unpack_miri_exoted(infile, trim_start, trim_end):
     ii = np.argsort(wave)
     wave, wave_err = wave[ii], wave_err[ii]
     fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+
+    if wl_min is not None and wl_max is not None:
+        ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
     
     wavelength = wave
     wavelength_err = wave_err
