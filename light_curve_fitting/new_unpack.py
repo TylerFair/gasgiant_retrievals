@@ -146,7 +146,12 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end):
         ii = np.where(wave >= 2.87)[0]
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
-    
+    elif instrument == 'NIRSPEC/PRISM':
+        ii = np.where((wave >=0.6) & (wave <= 5.0))[0]
+        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+        
+
     wavelength = wave
     wavelength_err = wave_err
     t = np.array(bjd)
