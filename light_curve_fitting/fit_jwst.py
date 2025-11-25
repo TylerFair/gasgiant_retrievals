@@ -763,6 +763,10 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
             c_i = map_params['c'][i]
             A_spot_i = map_params['A_spot'][i]
             trend = c_i + A_spot_i * gp_trend # assuming passed as gp_trend arg/spot_trend arg
+        elif detrend_type == 'linear_discontinuity_spectroscopic':
+            c_i = map_params['c'][i]
+            A_jump_i = map_params['A_jump'][i]
+            trend = c_i + A_jump_i * gp_trend # assuming jump_trend is passed in gp_trend
         elif detrend_type != 'none':
             c_i = map_params['c'][i]
             v_i = map_params['v'][i]
@@ -772,7 +776,30 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
             elif detrend_type == 'quadratic':
                 v2_i = map_params['v2'][i]
                 trend = c_i + v_i * t_shift + v2_i * t_shift**2
-            # ... (other parametric trends) ...
+            elif detrend_type == 'cubic':
+                v2_i = map_params['v2'][i]
+                v3_i = map_params['v3'][i]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3
+            elif detrend_type == 'quartic':
+                v2_i = map_params['v2'][i]
+                v3_i = map_params['v3'][i]
+                v4_i = map_params['v4'][i]
+                trend = c_i + v_i * t_shift + v2_i * t_shift**2 + v3_i * t_shift**3 + v4_i * t_shift**4
+            elif detrend_type == 'explinear':
+                A_i = map_params['A'][i]
+                tau_i = map_params['tau'][i]
+                trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
+            elif detrend_type == 'linear_discontinuity':
+                t_jump_i = map_params['t_jump'][i]
+                jump_i = map_params['jump'][i]
+                jump = np.where(time > t_jump_i, jump_i, 0.0)
+                trend = c_i + v_i * t_shift + jump
+            elif detrend_type == 'spot':
+                spot_amp_i = map_params['spot_amp'][i]
+                spot_mu_i = map_params['spot_mu'][i]
+                spot_sigma_i = map_params['spot_sigma'][i]
+                spot = spot_crossing(time, spot_amp_i, spot_mu_i, spot_sigma_i)
+                trend = c_i + v_i * t_shift + spot
             else:
                 trend = c_i + v_i * t_shift 
         else:
