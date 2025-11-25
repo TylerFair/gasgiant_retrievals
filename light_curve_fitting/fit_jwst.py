@@ -682,7 +682,7 @@ def save_results(wavelengths, samples, csv_filename):
 
 def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err, samples, map_params,
                                transit_params, detrend_type, output_prefix,
-                               total_error_fit=None, gp_trend=None):
+                               total_error_fit=None, gp_trend=None, spot_trend=None, jump_trend=None):
     n_wavelengths = len(wavelengths)
     n_times = len(time)
     print(f"Saving detailed fit results to {output_prefix}_*.csv")
@@ -703,21 +703,52 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         if detrend_type != 'none':
             row['c'] = np.nanmedian(samples['c'][:, i])
             row['c_err'] = np.std(samples['c'][:, i])
-            if detrend_type != 'gp_spectroscopic':
+            # v is not present in pure gp_spectroscopic
+            if 'v' in samples:
                 row['v'] = np.nanmedian(samples['v'][:, i])
                 row['v_err'] = np.std(samples['v'][:, i])
-
-        if detrend_type == 'explinear':
+        
+        # Add other potential parametric terms
+        if 'v2' in samples:
+            row['v2'] = np.nanmedian(samples['v2'][:, i])
+            row['v2_err'] = np.std(samples['v2'][:, i])
+        if 'v3' in samples:
+            row['v3'] = np.nanmedian(samples['v3'][:, i])
+            row['v3_err'] = np.std(samples['v3'][:, i])
+        if 'v4' in samples:
+            row['v4'] = np.nanmedian(samples['v4'][:, i])
+            row['v4_err'] = np.std(samples['v4'][:, i])
+        if 'A' in samples:
             row['A'] = np.nanmedian(samples['A'][:, i])
             row['A_err'] = np.std(samples['A'][:, i])
+        if 'tau' in samples:
             row['tau'] = np.nanmedian(samples['tau'][:, i])
             row['tau_err'] = np.std(samples['tau'][:, i])
-        
-        # Spectroscopic GP amplitude
-        if 'gp_spectroscopic' in detrend_type:
+        if 't_jump' in samples:
+            row['t_jump'] = np.nanmedian(samples['t_jump'][:, i])
+            row['t_jump_err'] = np.std(samples['t_jump'][:, i])
+        if 'jump' in samples:
+            row['jump'] = np.nanmedian(samples['jump'][:, i])
+            row['jump_err'] = np.std(samples['jump'][:, i])
+        if 'spot_amp' in samples:
+            row['spot_amp'] = np.nanmedian(samples['spot_amp'][:, i])
+            row['spot_amp_err'] = np.std(samples['spot_amp'][:, i])
+            row['spot_mu'] = np.nanmedian(samples['spot_mu'][:, i])
+            row['spot_mu_err'] = np.std(samples['spot_mu'][:, i])
+            row['spot_sigma'] = np.nanmedian(samples['spot_sigma'][:, i])
+            row['spot_sigma_err'] = np.std(samples['spot_sigma'][:, i])
+
+        # Spectroscopic template amplitudes
+        if 'A_gp' in samples:
             row['A_gp'] = np.nanmedian(samples['A_gp'][:, i])
             row['A_gp_err'] = np.std(samples['A_gp'][:, i])
-
+        if 'A_spot' in samples:
+            row['A_spot'] = np.nanmedian(samples['A_spot'][:, i])
+            row['A_spot_err'] = np.std(samples['A_spot'][:, i])
+        if 'A_jump' in samples:
+            row['A_jump'] = np.nanmedian(samples['A_jump'][:, i])
+            row['A_jump_err'] = np.std(samples['A_jump'][:, i])
+            
         param_rows.append(row)
 
     params_df = pd.DataFrame(param_rows)
@@ -746,39 +777,56 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
             total_model_flux += planet_model
 
         transit_model = total_model_flux
+        
+        # --- Reconstruct the trend based on detrend_type and map_params ---
+        t_shift = time - np.min(time)
+        trend = np.ones_like(time) # Default for 'none' case
 
-        if 'gp_spectroscopic' in detrend_type:
+        if detrend_type != 'none':
             c_i = map_params['c'][i]
-            A_gp_i = map_params['A_gp'][i]
-            # Handle mixed trends
-            t_shift = time - np.min(time)
-            trend_parametric = c_i
-            if 'linear' in detrend_type:
-                trend_parametric += map_params['v'][i] * t_shift
-            elif 'quadratic' in detrend_type:
-                trend_parametric += map_params['v'][i] * t_shift + map_params['v2'][i] * t_shift**2
             
-            trend = trend_parametric + A_gp_i * gp_trend
+            if 'gp_spectroscopic' in detrend_type:
+                trend_parametric = c_i
+                if 'linear' in detrend_type and 'v' in map_params:
+                    trend_parametric += map_params['v'][i] * t_shift
+                if 'quadratic' in detrend_type and 'v2' in map_params:
+                    trend_parametric += map_params['v2'][i] * t_shift**2
+                trend = trend_parametric + map_params['A_gp'][i] * gp_trend
+            
+            elif detrend_type == 'spot_spectroscopic':
+                trend = c_i + map_params['A_spot'][i] * spot_trend
+            
+            elif detrend_type == 'linear_discontinuity_spectroscopic':
+                trend = c_i + map_params['A_jump'][i] * jump_trend
 
-        elif detrend_type == 'spot_spectroscopic':
-            c_i = map_params['c'][i]
-            A_spot_i = map_params['A_spot'][i]
-            trend = c_i + A_spot_i * gp_trend # assuming passed as gp_trend arg/spot_trend arg
-        elif detrend_type != 'none':
-            c_i = map_params['c'][i]
-            v_i = map_params['v'][i]
-            t_shift = time - np.min(time)
-            if detrend_type == 'linear':
-                trend = c_i + v_i * t_shift
-            elif detrend_type == 'quadratic':
-                v2_i = map_params['v2'][i]
-                trend = c_i + v_i * t_shift + v2_i * t_shift**2
-            # ... (other parametric trends) ...
-            else:
-                trend = c_i + v_i * t_shift 
-        else:
-            trend = np.ones_like(time)
-
+            else: # Purely parametric models
+                v_i = map_params.get('v', [0.0]*n_wavelengths)[i]
+                if detrend_type == 'linear':
+                    trend = c_i + v_i * t_shift
+                elif detrend_type == 'quadratic':
+                    trend = c_i + v_i * t_shift + map_params['v2'][i] * t_shift**2
+                elif detrend_type == 'cubic':
+                    trend = c_i + v_i * t_shift + map_params['v2'][i] * t_shift**2 + map_params['v3'][i] * t_shift**3
+                elif detrend_type == 'quartic':
+                    trend = c_i + v_i * t_shift + map_params['v2'][i] * t_shift**2 + map_params['v3'][i] * t_shift**3 + map_params['v4'][i] * t_shift**4
+                elif detrend_type == 'explinear':
+                    trend = c_i + v_i * t_shift + map_params['A'][i] * np.exp(-t_shift / map_params['tau'][i])
+                elif detrend_type == 'linear_discontinuity':
+                    jump_term = np.where(time > map_params['t_jump'][i], map_params['jump'][i], 0.0)
+                    trend = c_i + v_i * t_shift + jump_term
+                elif detrend_type == 'spot':
+                    spot_term = spot_crossing(time, map_params['spot_amp'][i], map_params['spot_mu'][i], map_params['spot_sigma'][i])
+                    trend = c_i + v_i * t_shift + spot_term
+        
+        # The transit model is flux, so the trend needs to be subtracted from the data.
+        # The light curve model is transit_model + trend.
+        # So detrended flux is raw_flux - trend.
+        # The transit_model is the (planet_flux - 1), so the full model is (transit_model+1) + (trend-1)
+        # Let's adjust this. The `compute_lc` functions return `_compute_transit_model + trend`.
+        # `_compute_transit_model` returns values centered at 0 for the transit.
+        # So the final model is `total_model_flux + trend`.
+        # And detrended flux is `flux[i] - trend`. This looks correct.
+        
         full_model = transit_model + trend
         detrended_flux = flux[i] - trend
 
@@ -1026,9 +1074,6 @@ def main():
     if not stringcheck or ('gp' in detrending_type):
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
             
-            data = pd.DataFrame(data={'time': data.wl_time, 'flux': data.wl_flux})
-            data.to_csv(f'{output_dir}/stuff.csv')
-            exit()
             print('Fitting whitelight for outliers and bestfit parameters')
             hyper_params_wl = {
                 "duration": PRIOR_DUR,
@@ -1444,7 +1489,6 @@ def main():
             plt.tight_layout()
             plt.savefig(f'{output_dir}/16_{instrument_full_str}_beta_analysis.png')
             plt.close(fig_beta)
-
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
             
             if 'gp' in detrending_type:
@@ -1496,7 +1540,6 @@ def main():
             B_BASE = bestfit_params_wl_df['b'].values
             RORS_BASE = bestfit_params_wl_df['rors'].values
             DEPTH_BASE = RORS_BASE**2
-            exit()    
         else:
             print(f'GP trends already exist...')
             wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
@@ -1590,6 +1633,12 @@ def main():
         if 'gp_spectroscopic' in detrend_type_multiwave:
             model_run_args_lr['gp_trend'] = gp_trend
             init_params_lr['A_gp'] = jnp.ones(num_lcs_lr)
+        if 'spot_spectroscopic' in detrend_type_multiwave:
+            model_run_args_lr['spot_trend'] = spot_trend
+            init_params_lr['A_spot'] = jnp.ones(num_lcs_lr)
+        if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+            model_run_args_lr['jump_trend'] = jump_trend
+            init_params_lr['A_jump'] = jnp.ones(num_lcs_lr)
 
         samples_lr = get_samples(lr_model_for_run, key_mcmc_lr, time_lr, flux_err_lr, flux_lr, init_params_lr, **model_run_args_lr)
 
@@ -1652,7 +1701,9 @@ def main():
         flux_lr = flux_lr[:, valid]
         flux_err_lr = flux_err_lr[:, valid]
         if gp_trend is not None: gp_trend = gp_trend[valid]
-
+        if spot_trend is not None: spot_trend = spot_trend[valid]
+        if jump_trend is not None: jump_trend = jump_trend[valid]
+        
         print("Plotting low-resolution fits and residuals...")
         median_total_error_lr = np.nanmedian(samples_lr['total_error'], axis=0)
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
@@ -1678,7 +1729,7 @@ def main():
 
         plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
-        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend)
+        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
     # ----------------------------------------------------
     # HIGH RES ANALYSIS
@@ -1701,6 +1752,8 @@ def main():
         flux_hr = flux_hr[:, valid]
         flux_err_hr = flux_err_hr[:, valid]
         if gp_trend is not None: gp_trend = gp_trend[valid]
+        if spot_trend is not None: spot_trend = spot_trend[valid]
+        if jump_trend is not None: jump_trend = jump_trend[valid]
 
     num_lcs_hr = flux_err_hr.shape[0]
     DEPTHS_BASE_HR = jnp.tile(DEPTH_BASE, (num_lcs_hr, 1))
@@ -1750,6 +1803,12 @@ def main():
     if 'gp_spectroscopic' in detrend_type_multiwave:
         model_run_args_hr['gp_trend'] = gp_trend
         init_params_hr['A_gp'] = jnp.ones(num_lcs_hr)
+    if 'spot_spectroscopic' in detrend_type_multiwave:
+        model_run_args_hr['spot_trend'] = spot_trend
+        init_params_hr['A_spot'] = jnp.ones(num_lcs_hr)
+    if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+        model_run_args_hr['jump_trend'] = jump_trend
+        init_params_hr['A_jump'] = jnp.ones(num_lcs_hr)
 
     samples_hr = get_samples(hr_model_for_run, key_mcmc_hr, time_hr, flux_err_hr, flux_hr, init_params_hr, **model_run_args_hr)
 
@@ -1797,9 +1856,10 @@ def main():
 
     plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
-    save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{hr_bin_str}", median_total_error_hr, gp_trend)
+    save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{hr_bin_str}", median_total_error_hr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
     
     print("\nAnalysis complete!")
 
 if __name__ == "__main__":
     main()
+
