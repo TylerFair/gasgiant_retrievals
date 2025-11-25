@@ -780,7 +780,7 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         
         # --- Reconstruct the trend based on detrend_type and map_params ---
         t_shift = time - np.min(time)
-        trend = np.ones_like(time) # Default for 'none' case
+        trend = np.zeros_like(time)
 
         if detrend_type != 'none':
             c_i = map_params['c'][i]
@@ -791,6 +791,8 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                     trend_parametric += map_params['v'][i] * t_shift
                 if 'quadratic' in detrend_type and 'v2' in map_params:
                     trend_parametric += map_params['v2'][i] * t_shift**2
+                if 'explinear' in detrend_type and 'A' in map_params:
+                    trend_parametric += map_params['A'][i] * np.exp(-t_shift / map_params['tau'][i])
                 trend = trend_parametric + map_params['A_gp'][i] * gp_trend
             
             elif detrend_type == 'spot_spectroscopic':
@@ -817,15 +819,8 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                 elif detrend_type == 'spot':
                     spot_term = spot_crossing(time, map_params['spot_amp'][i], map_params['spot_mu'][i], map_params['spot_sigma'][i])
                     trend = c_i + v_i * t_shift + spot_term
-        
-        # The transit model is flux, so the trend needs to be subtracted from the data.
-        # The light curve model is transit_model + trend.
-        # So detrended flux is raw_flux - trend.
-        # The transit_model is the (planet_flux - 1), so the full model is (transit_model+1) + (trend-1)
-        # Let's adjust this. The `compute_lc` functions return `_compute_transit_model + trend`.
-        # `_compute_transit_model` returns values centered at 0 for the transit.
-        # So the final model is `total_model_flux + trend`.
-        # And detrended flux is `flux[i] - trend`. This looks correct.
+        else:
+            trend = np.ones_like(time)
         
         full_model = transit_model + trend
         detrended_flux = flux[i] - trend
@@ -1276,8 +1271,7 @@ def main():
             elif detrending_type == 'linear_discontinuity':
                 wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
             else:
-                 print('Error with model, not defined!')
-                 exit()
+                raise ValueError(f"Unsupported detrend_type for final model reconstruction: {detrending_type}")
 
             wl_residual = data.wl_flux - wl_transit_model
             wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
@@ -1353,12 +1347,9 @@ def main():
                 detrended_flux = f_masked - trend + 1.0
 
             elif detrending_type == 'none':
-                detrended_flux = f_masked 
-                
+                detrended_flux = f_masked
             else:
-                # Fallback: assume linear
-                trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked
-                detrended_flux = f_masked - trend + 1.0 
+                raise ValueError(f"Unsupported detrend_type for detrended flux calculation: {detrending_type}")
 
             plt.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5)
             plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
