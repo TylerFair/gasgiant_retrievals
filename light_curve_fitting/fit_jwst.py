@@ -1110,12 +1110,7 @@ def main():
                 init_params_wl['GP_log_rho'] = jnp.log(1)
 
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
-            
-            # Special logic for Spot Sliding Window - only if purely spot model
-            if detrending_type == 'spot':
-                whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets) # Temp
-                # ... [Slider code omitted for brevity as it was specific to pure spot] ...
-
+    
             if 'gp' in detrending_type:
                 print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
                 whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
