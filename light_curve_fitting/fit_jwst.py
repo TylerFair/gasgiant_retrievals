@@ -1026,7 +1026,9 @@ def main():
     if not stringcheck or ('gp' in detrending_type):
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
             
-    
+            data = pd.DataFrame(data={'time': data.wl_time, 'flux': data.wl_flux})
+            data.to_csv(f'{output_dir}/stuff.csv')
+            exit()
             print('Fitting whitelight for outliers and bestfit parameters')
             hyper_params_wl = {
                 "duration": PRIOR_DUR,
