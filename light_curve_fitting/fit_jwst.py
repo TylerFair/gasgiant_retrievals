@@ -47,7 +47,7 @@ def _tree_to_f64(tree):
 def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
-def jax_bin_lightcurve(time, flux, duration, points_per_transit=8):
+def jax_bin_lightcurve(time, flux, duration, points_per_transit=20):
     dt = duration / points_per_transit
     t_min = jnp.min(time)
     t_max = jnp.max(time)
@@ -310,19 +310,22 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
         if any(comp in detrend_components for comp in ['linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot', 'gp']):
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
         if any(comp in detrend_components for comp in ['linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot']):
-            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1))
         if any(comp in detrend_components for comp in ['quadratic', 'cubic', 'quartic']):
-            params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1))
+            params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1))
         if any(comp in detrend_components for comp in ['cubic', 'quartic']):
-            params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1))
+            params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1))
         if 'quartic' in detrend_components:
-            params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1))
+            params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1))
         if 'linear_discontinuity' in detrend_components:
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1))
         if 'explinear' in detrend_components:
-            params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
-            params['tau'] = numpyro.sample('tau', dist.HalfNormal(0.1))
+            params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
+            log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-5), jnp.log(1.0)))
+            params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
+            #params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
+            #params['tau'] = numpyro.sample('tau', dist.HalfNormal(0.1))
         if 'spot' in detrend_components:
             params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(0.0, 0.01))
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
@@ -1122,7 +1125,7 @@ def main():
             if 'quartic' in detrending_type:
                 init_params_wl['v2'] = 0.0; init_params_wl['v3'] = 0.0; init_params_wl['v4'] = 0.0
             if 'explinear' in detrending_type:
-                init_params_wl['A'] = 0.0; init_params_wl['tau'] = 0.5
+                init_params_wl['A'] = 0.001; init_params_wl['tau'] = 0.5
             if 'gp' in detrending_type:
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_rho'] = jnp.log(1)
@@ -1302,6 +1305,7 @@ def main():
 
             plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
+
             plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
             plt.close()
 
@@ -1381,6 +1385,7 @@ def main():
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.close()
 
+            transit_only_model = _compute_transit_model(bestfit_params_wl, t_masked) + 1.0
             residuals_detrended = detrended_flux - transit_only_model 
             # ----------------------------------------------------
             # 15_ SUMMARY PLOT (3x2 Grid Layout)
@@ -1398,7 +1403,7 @@ def main():
                                             jnp.array(residuals_detrended), 
                                             bestfit_params_wl['duration'])
             # Style for the binned points
-            bin_style = dict(c='red', s=30, edgecolors='white', linewidths=0.8, zorder=10, label='Binned (8/dur)')
+            bin_style = dict(c='mediumorchid', s=30,  zorder=10, label='Binned (8/dur)')
 
             # Define Main Grid: 3 Rows x 2 Columns
             # Column 1: Light curve panels
@@ -1408,7 +1413,7 @@ def main():
 
             # --- Column 1, Row 1: Raw Light Curve ---
             ax1 = fig.add_subplot(gs[0, 0])
-            ax1.scatter(data.wl_time, data.wl_flux, c='k', s=3, alpha=0.2)
+            ax1.scatter(data.wl_time, data.wl_flux, c='.7', s=1, alpha=0.2)
             ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
             ax1.set_title('Raw Light Curve', fontsize=14)
             ax1.set_ylabel('Flux', fontsize=12)
@@ -1416,7 +1421,7 @@ def main():
 
             # --- Column 1, Row 2: Raw Light Curve + Best-fit Model ---
             ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
-            ax2.scatter(data.wl_time, data.wl_flux, c='k', s=3, alpha=0.2)
+            ax2.scatter(data.wl_time, data.wl_flux, c='.7', s=1, alpha=0.2)
             ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
             ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
@@ -1432,9 +1437,8 @@ def main():
 
             # Detrended Light Curve (Top of nested)
             ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
-            transit_only_model = _compute_transit_model(bestfit_params_wl, t_masked) + 1.0
 
-            ax3_top.scatter(t_masked, detrended_flux, c='k', s=3, alpha=0.2, label='Detrended Data')
+            ax3_top.scatter(t_masked, detrended_flux, c='.7', s=1, alpha=0.2, label='Detrended Data')
             ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
             ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
             ax3_top.set_ylabel('Normalized Flux', fontsize=12)
@@ -1445,10 +1449,9 @@ def main():
             ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
     
 
-            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=3, alpha=0.2)
-            ax3_bot.axhline(0, color='mediumorchid', lw=2, zorder=3, linestyle='--')
+            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='.7', s=1, alpha=0.2)
+            ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
             ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det), **bin_style)
-
             ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
             ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
 
