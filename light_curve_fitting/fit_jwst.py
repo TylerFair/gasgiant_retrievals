@@ -47,7 +47,23 @@ def _tree_to_f64(tree):
 def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
-
+def jax_bin_lightcurve(time, flux, duration, points_per_transit=8):
+    dt = duration / points_per_transit
+    t_min = jnp.min(time)
+    t_max = jnp.max(time)
+    total_range = t_max - t_min
+    num_bins = jnp.ceil(total_range / dt).astype(int) + 1
+    bin_indices = jnp.clip(((time - t_min) / dt).astype(int), 0, num_bins - 1)
+    flux_sums = jnp.zeros(num_bins)
+    time_sums = jnp.zeros(num_bins)
+    counts = jnp.zeros(num_bins)
+    flux_sums = flux_sums.at[bin_indices].add(flux)
+    time_sums = time_sums.at[bin_indices].add(time)
+    counts = counts.at[bin_indices].add(1.0)
+    binned_flux = jnp.where(counts > 0, flux_sums / counts, jnp.nan)
+    binned_time = jnp.where(counts > 0, time_sums / counts, jnp.nan)
+    return binned_time, binned_flux
+    
 def _noise_binning_stats(residuals, n_bins=30, max_bin=None):
     """
     residuals: array-like, shape (n_channels, n_times) or (n_times,)
@@ -1365,11 +1381,24 @@ def main():
             plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
             plt.close()
 
-            
+            residuals_detrended = detrended_flux - transit_only_model 
             # ----------------------------------------------------
             # 15_ SUMMARY PLOT (3x2 Grid Layout)
             # ----------------------------------------------------
             fig = plt.figure(figsize=(16, 14))
+            b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
+                                                jnp.array(data.wl_flux), 
+                                                bestfit_params_wl['duration'])
+            
+            # 2. Detrended Data Binning
+            b_time_det, b_flux_det = jax_bin_lightcurve(jnp.array(t_masked), 
+                                                        jnp.array(detrended_flux), 
+                                                        bestfit_params_wl['duration'])
+            b_time_det, b_res_det = jax_bin_lightcurve(jnp.array(t_masked), 
+                                            jnp.array(residuals_detrended), 
+                                            bestfit_params_wl['duration'])
+            # Style for the binned points
+            bin_style = dict(c='red', s=30, edgecolors='white', linewidths=0.8, zorder=10, label='Binned (8/dur)')
 
             # Define Main Grid: 3 Rows x 2 Columns
             # Column 1: Light curve panels
@@ -1379,14 +1408,16 @@ def main():
 
             # --- Column 1, Row 1: Raw Light Curve ---
             ax1 = fig.add_subplot(gs[0, 0])
-            ax1.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
+            ax1.scatter(data.wl_time, data.wl_flux, c='k', s=3, alpha=0.2)
+            ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
             ax1.set_title('Raw Light Curve', fontsize=14)
             ax1.set_ylabel('Flux', fontsize=12)
             ax1.tick_params(labelbottom=False)
 
             # --- Column 1, Row 2: Raw Light Curve + Best-fit Model ---
             ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
-            ax2.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
+            ax2.scatter(data.wl_time, data.wl_flux, c='k', s=3, alpha=0.2)
+            ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
             ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
             ax2.set_ylabel('Flux', fontsize=12)
@@ -1403,19 +1434,20 @@ def main():
             ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
             transit_only_model = _compute_transit_model(bestfit_params_wl, t_masked) + 1.0
 
-            ax3_top.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5, label='Detrended Data')
+            ax3_top.scatter(t_masked, detrended_flux, c='k', s=3, alpha=0.2, label='Detrended Data')
             ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
-
+            ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
             ax3_top.set_ylabel('Normalized Flux', fontsize=12)
             ax3_top.set_title('Detrended Light Curve', fontsize=14)
             plt.setp(ax3_top.get_xticklabels(), visible=False)
 
             # Residuals (Bottom of nested)
             ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
-            residuals_detrended = detrended_flux - transit_only_model 
+    
 
-            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=6, alpha=0.5)
+            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=3, alpha=0.2)
             ax3_bot.axhline(0, color='mediumorchid', lw=2, zorder=3, linestyle='--')
+            ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det), **bin_style)
 
             ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
             ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
