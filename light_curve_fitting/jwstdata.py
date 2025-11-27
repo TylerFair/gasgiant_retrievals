@@ -331,15 +331,36 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     if mask_end is not None and mask_start is None:
         raise ValueError('Time mask end supplied but missing start time! Please give mask_start')
     
+    def evaluate_mask_value(value, time):
+        """Evaluate a mask value that could be a number or string expression."""
+        if isinstance(value, str):
+            namespace = {
+                'jnp': np, 
+                'np': np,
+                't': time,
+                'time': time,
+                'min': np.min,
+                'max': np.max,
+            }
+            return eval(value, {"__builtins__": {}}, namespace)
+        else:
+            return value
+    
     if mask_start is not None and mask_end is not None:
-        if hasattr(mask_start, '__len__'):
+        # Check if it's a list/array (but not a string!)
+        if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
             # Multiple time ranges to mask
             timemask = np.zeros_like(time, dtype=bool)
             for start, end in zip(mask_start, mask_end):
-                timemask |= (time >= start) & (time <= end)
+                # Evaluate each start/end value
+                start_val = evaluate_mask_value(start, time)
+                end_val = evaluate_mask_value(end, time)
+                timemask |= (time >= start_val) & (time <= end_val)
         else:
-            # Single time range to mask
-            timemask = (time >= mask_start) & (time <= mask_end)
+            # Single time range to mask (could be string or number)
+            start_val = evaluate_mask_value(mask_start, time)
+            end_val = evaluate_mask_value(mask_end, time)
+            timemask = (time >= start_val) & (time <= end_val)
         
         time = time[~timemask]
         flux_unbinned = flux_unbinned[~timemask, :]
@@ -349,7 +370,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     prior_t0s = np.atleast_1d(planet_cfg['t0'])
     prior_durations = np.atleast_1d(planet_cfg['duration'])
 
-    # OOT mask should be true for times outside of ANY transit
     in_transit_mask = np.zeros_like(time, dtype=bool)
     for t0, duration in zip(prior_t0s, prior_durations):
         in_transit_mask |= (time >= t0 - 0.6 * duration) & (time <= t0 + 0.6 * duration)
