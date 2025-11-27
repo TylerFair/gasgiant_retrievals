@@ -1451,7 +1451,7 @@ def main():
 
             ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='.7', s=1, alpha=0.2)
             ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
-            ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det), **bin_style)
+            ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det) * 1e6 , **bin_style)
             ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
             ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
 
