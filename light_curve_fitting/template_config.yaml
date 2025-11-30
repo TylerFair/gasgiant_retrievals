@@ -1,59 +1,46 @@
-# config.yaml
+# Auto-generated config for HAT-P-18
+# Transit time (t0) automatically assigned: 59743.353393
 
 planet:
-  name: HATP11b       # Planet name. 
-  period:     4.887802443     # fixed 
-  duration:   0.09815       # prior
-  t0:         60895.9922    # prior, needs to be estimated from whitelight glance
-  b:          0.227         # prior
-  rprs:      0.058993       # prior
-
+  name: HAT-P-18
+  period: 5.50802941
+  duration: 0.10999997916666666
+  t0: 59743.353393
+  b: 0.148
+  rprs: 0.1356
+  
 stellar:
-  feh:   0.31
-  teff:  4780
-  logg:  4.563
+  feh: 0.10
+  teff: 4803.0
+  logg: 4.57
   ld_model: "stagger"
   ld_data_path: "../exotic_ld_data"
 
 instrument: 'NIRISS/SOSS'
-order: 1            # NIRISS Order (1 or 2)
-nrs: None           # NIRSPEC NRS (1 or 2, PRISM & G395M = 1)
-path: 'HATP11'      # Base path to input and output dirs
-input_dir: 'HATP11b_NIRISS' # where fits files are stored relative to path. 
-output_dir: 'ORDER1_LINEAR_INTERPLD' # where the output files are to be stored relative to path
-fits_file: 'xyz.fits' # fits file in input_dir. 
-
+order: 1
+path: 'placeholder'
+input_dir: 'FITS'
+output_dir: 'HAT-P-18_SOSS_FREELD_EXPLINEAR'
+fits_file: 'HAT-P-18_box_spectra_fullres.fits'
 resolution:
-  high: 400 # instrument resolution to bin to; 'native' for native resolution. 
-  low:  40 #  instrument resolution to bin to [optional: not triggered if low-res flag is False]
-  
-pixels:
-  high: 20 # instrument pixels to bin to (cannot be both resolution and pixels) 
-  low: 100 # instrument pixels to bin to (cannot be both resolution and pixels) 
-  
+  high: 'reference'
+  low: 20
+  reference_grid: 'prism_template.csv'
 flags:
-  detrending_type: 'linear'  # Type of detrending: 
-                                # none = no detrending. 
-                                # linear = offset + linear with time term,
-                                # gp = whitelight gp on CPU which is subtracted from multiwavelength, and then linear on GPU, 
-                                # explinear = linear with Aexp(-t/tau) ramp. 
-                                # spot = experimental spot crossing + linear trend. Requires spot_amp, spot_center and spot_width.
-  interpolate_trend: False # Option to interpolate trend coefficients from low res to high res | defaults to False
-  interpolate_ld: True # Option to interpolate LD coefficients from low res ot high res | defaults to false
+  detrending_type: 'explinear'
+  interpolate_trend: False
+  interpolate_ld: False
   fix_ld: False
-  need_lowres: True # Option to fit low res first if other flags are false to clip spectroscopic outliers, reccommended
-  mask_start: False # Used to specify time at which spot crossing occurs to remove, can also be lists for N masks [1000, 1005]
-  mask_end: False  # Used to specify time at which spot crossing ends to remove, can also be lists for N masks [1000, 1005]
-  #spot_amp: 0.0 # ampltiude of spot crossing in relative flux (check initial guess plot)
-  #spot_center: 0.0 # center of spot crossing (in time units i.e. 60123.45 ) 
-  #spot_width: 0.0 # width of spot crossing (in days i.e. 0.01 ~ 15 minutes)
-
-  
+  need_lowres: True
+  mask_start: jnp.min(t)
+  mask_end: jnp.min(t) + 0.020833
+  mask_integrations_start: None
+  #mask_integrations_end:
 outlier_clip:
-  whitelight_sigma:   4 # sigma to clip outliers from whitelight residual 
-  spectroscopic_sigma: 4 # sigma to clip outliers from spectroscopic residuals
+  whitelight_sigma: 4
+  spectroscopic_sigma: 4
 
-host_device: "gpu"      # 'gpu' or "cpu" | reminder, if using gpu you need jax[cuda].
+host_device: "cpu"
 
 
 
