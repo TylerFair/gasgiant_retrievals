@@ -133,7 +133,7 @@ def unpack_niriss_exoted(infile, order, trim_start, trim_end, wl_min_o1=None, wl
     return wavelength,wavelength_err, t, fluxcube, fluxcube_err
 
 def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None):    
-
+    print(wl_min, wl_max)
     bjd = fits.getdata(infile, 5)
     wave = fits.getdata(infile, 1)
     wave_err = fits.getdata(infile, 2)
@@ -143,7 +143,9 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end, wl_min=None,
     wave_err = wave_err[5:-5]
     fluxcube = fluxcube[:, 5:-5]
     fluxcube_err = fluxcube_err[:, 5:-5]
-
+    print(bjd)
+    print(wave)
+    
     start = 0 if (trim_start is None) else int(trim_start)
     stop  = None if (trim_end in (None, 0)) else -int(trim_end)
 
@@ -152,7 +154,7 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end, wl_min=None,
     bjd            = bjd[start:stop]   # keep time aligned!
 
 
-    if instrument != 'NIRSPEC/PRISM':
+    if instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/G395H':
         ii = np.where((wave >= 2.9) & (wave <= 5.0))[0]
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
@@ -160,7 +162,11 @@ def unpack_nirspec_exoted(infile, instrument, trim_start, trim_end, wl_min=None,
         ii = np.where((wave >= 0.6) & (wave <= 5.0))[0]
         fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
         wave, wave_err = wave[ii], wave_err[ii]
-        
+    if instrument == 'NIRSPEC/G140H':
+        ii = np.where((wave >= 1.0) & (wave <= 1.8))[0]
+        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
     if wl_min is not None and wl_max is not None:
         ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
         fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
