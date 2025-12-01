@@ -96,17 +96,20 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_resolution(
                 wavelengths, flux_transposed, flux_err_transposed, low_res, method='average'
             )
-
-        # Trim edge wavelengths for low-res based on detector
-        if nrs == 1:
-            # NRS1: clip wavelengths < 2.9 microns
-            valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
-        elif nrs == 2:
-            # NRS2: clip wavelengths > 5.0 microns
-            valid_lr = wl_lr <= 5.0
-        else:
-            valid_lr = np.ones(len(wl_lr), dtype=bool)
-
+        if cfg['instrument'] == 'NIRSPEC/G395M' or cfg['instrument'] == 'NIRSPEC/G395H':
+            # Trim edge wavelengths for low-res based on detector
+            if nrs == 1:
+                # NRS1: clip wavelengths < 2.9 microns
+                valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
+            elif nrs == 2:
+                # NRS2: clip wavelengths > 5.0 microns
+                valid_lr = wl_lr <= 5.0
+            else:
+                valid_lr = np.ones(len(wl_lr), dtype=bool)
+        if cfg['instrument'] == 'NIRSPEC/PRISM':
+            valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
+        if cfg['instrument'] == 'NIRSPEC/G140H':
+            valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
         wl_lr = wl_lr[valid_lr]
         wl_err_lr = wl_err_lr[valid_lr]
         flux_lr = flux_lr[valid_lr]
@@ -135,17 +138,20 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_hr, wl_err_hr, flux_hr, flux_err_hr = bin_at_resolution(
                 wavelengths, flux_transposed, flux_err_transposed, high_res, method='average'
             )
-
-        # Trim edge wavelengths for high-res based on detector
-        if nrs == 1:
-            # NRS1: clip wavelengths < 2.9 microns
-            valid_hr = (wl_hr >= 2.9) & (wl_hr<= 5.0)
-        elif nrs == 2:
-            # NRS2: clip wavelengths > 5.0 microns
-            valid_hr = wl_hr <= 5.0
-        else:
-            valid_hr = np.ones(len(wl_hr), dtype=bool)
-
+        if cfg['instrument'] == 'NIRSPEC/G395H' or cfg['instrument'] == 'NIRSPEC/G395M':
+            # Trim edge wavelengths for high-res based on detector
+            if nrs == 1:
+                # NRS1: clip wavelengths < 2.9 microns
+                valid_hr = (wl_hr >= 2.9) & (wl_hr<= 5.0)
+            elif nrs == 2:
+                # NRS2: clip wavelengths > 5.0 microns
+                valid_hr = wl_hr <= 5.0
+            else:
+                valid_hr = np.ones(len(wl_hr), dtype=bool)
+        if cfg['instrument'] == 'NIRSPEC/PRISM':
+            valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
+        if cfg['instrument'] == 'NIRSPEC/G140H':
+            valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
         wl_hr = wl_hr[valid_hr]
         wl_err_hr = wl_err_hr[valid_hr]
         flux_hr = flux_hr[valid_hr]
@@ -213,24 +219,42 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_lr, wl_err_lr, flux_lr, flux_err_lr = bin_at_pixel(
             wavelengths, flux_transposed, flux_err_transposed, pixels.get('low'))
                   # Trim edge wavelengths based on detector
-        if nrs == 1:
-        # NRS1: clip wavelengths < 2.9 microns
-            valid_hr = (wl_hr >= 2.9) & (wl_hr <= 5.0)
+        if cfg['instrument'] == 'NIRSPEC/G395H' or cfg['instrument'] == 'NIRSPEC/G395M':
+            if nrs == 1:
+            # NRS1: clip wavelengths < 2.9 microns
+                valid_hr = (wl_hr >= 2.9) & (wl_hr <= 5.0)
+                wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+                flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
+                valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
+                wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
+                flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
+            elif nrs == 2:
+          # NRS2: clip wavelengths > 5.0 microns
+                valid_hr = wl_hr <= 5.0
+                wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+                flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
+                valid_lr = wl_lr <= 5.0
+                wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
+        if cfg['instrument'] == 'NIRSPEC/PRISM':
+            valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
             wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
             flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
 
-            valid_lr = (wl_lr >= 2.9) & (wl_lr <= 5.0)
+            valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
+            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
+            flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr] 
+       
+        if cfg['instrument'] == 'NIRSPEC/PRISM':
+            valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
+            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
+            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
+
+            valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
             wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
             flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr]
-        elif nrs == 2:
-      # NRS2: clip wavelengths > 5.0 microns
-            valid_hr = wl_hr <= 5.0
-            wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
-            flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
-
-            valid_lr = wl_lr <= 5.0
-            wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-
+        
         n_lr = min(len(wl_lr), flux_lr.shape[0], flux_err_lr.shape[0], len(wl_err_lr))
         wl_lr, wl_err_lr = wl_lr[:n_lr], wl_err_lr[:n_lr]
         flux_lr, flux_err_lr = flux_lr[:n_lr, :], flux_err_lr[:n_lr, :]
@@ -298,7 +322,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wl_min_o2 = wl_filt_cfg.get('wl_min_o2')
     wl_max_o2 = wl_filt_cfg.get('wl_max_o2')
 
-    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM':
+    if instrument == 'NIRSPEC/G395H' or instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/PRISM' or instrument == 'NIRSPEC/G140H':
         nrs = cfg['nrs']
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
@@ -404,6 +428,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet=planet_str,
         mini_instrument=mini_instrument
     )
+
 
 
 
