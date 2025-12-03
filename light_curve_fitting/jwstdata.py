@@ -104,12 +104,12 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             elif nrs == 2:
                 # NRS2: clip wavelengths > 5.0 microns
                 valid_lr = wl_lr <= 5.0
-            else:
-                valid_lr = np.ones(len(wl_lr), dtype=bool)
         if cfg['instrument'] == 'NIRSPEC/PRISM':
             valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
         if cfg['instrument'] == 'NIRSPEC/G140H':
             valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
+        else:
+            valid_lr = np.ones(len(wl_lr), dtype=bool)
         wl_lr = wl_lr[valid_lr]
         wl_err_lr = wl_err_lr[valid_lr]
         flux_lr = flux_lr[valid_lr]
@@ -146,12 +146,12 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             elif nrs == 2:
                 # NRS2: clip wavelengths > 5.0 microns
                 valid_hr = wl_hr <= 5.0
-            else:
-                valid_hr = np.ones(len(wl_hr), dtype=bool)
         if cfg['instrument'] == 'NIRSPEC/PRISM':
             valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
         if cfg['instrument'] == 'NIRSPEC/G140H':
             valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
+        else:
+            valid_hr = np.ones(len(wl_hr), dtype=bool) 
         wl_hr = wl_hr[valid_hr]
         wl_err_hr = wl_err_hr[valid_hr]
         flux_hr = flux_hr[valid_hr]
@@ -246,7 +246,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
             flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr] 
        
-        if cfg['instrument'] == 'NIRSPEC/PRISM':
+        if cfg['instrument'] == 'NIRSPEC/G140H':
             valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
             wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
             flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
