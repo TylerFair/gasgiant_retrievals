@@ -67,8 +67,8 @@ def jax_bin_lightcurve(time, flux, duration, points_per_transit=20):
 
 def spot_crossing(t, amp, mu, sigma):
     return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
-def get_I_power2(c1, c2, u):
-    return 1 - c1*(1-jnp.power(u,c2))
+def get_I_power2(c, alpha, u):
+    return 1 - c*(1-jnp.power(u,alpha))
 
 def _compute_transit_model(params, t):
     """Transit Model for one or more planets, using vmap for performance."""
@@ -213,7 +213,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             depths = numpyro.sample(f'depths_{i}', dist.Uniform(1e-5, 0.5))
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
         POLY_DEGREE = 12
-        MUS = jnp.linspace(0.01, 1.00, 300, endpoint=True)
+        MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+        #c, alpha = prior_params['u']
         u_theory = prior_params['u']
         c1_mu, c2_mu = u_theory[0], u_theory[1]
         power2_profile = get_I_power2(c1_mu, c2_mu, MUS)
@@ -696,7 +697,9 @@ def main():
             }
         if 'spot' in detrending_type:
             hyper_params_wl['spot_guess'] = spot_mu
+            
 
+        
         init_params_wl = {
             'u': U_mu_wl,
             'c': 1.0,
