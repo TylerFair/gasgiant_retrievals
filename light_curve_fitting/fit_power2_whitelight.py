@@ -213,10 +213,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             depths = numpyro.sample(f'depths_{i}', dist.Uniform(1e-5, 0.5))
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
         POLY_DEGREE = 12
-        MUS = jnp.linspace(0.01, 1, 40, endpoint=True)
-        #c, alpha = prior_params['u']
-        c1, c2 = numpyro.sample(f"u_sample", dist.TruncatedNormal(prior_params['u'], 0.1, low=-1.0, high=1.0))
-        power2_profile = get_I_power2(c1, c2, MUS)
+        MUS = jnp.linspace(0.01, 1.00, 300, endpoint=True)
+        u_theory = prior_params['u']
+        c1_mu, c2_mu = u_theory[0], u_theory[1]
+        power2_profile = get_I_power2(c1_mu, c2_mu, MUS)
         u_poly = calc_poly_coeffs(MUS, power2_profile,
                               poly_degree = POLY_DEGREE)
         u = numpyro.deterministic('u', u_poly)
