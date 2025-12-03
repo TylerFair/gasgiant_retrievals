@@ -301,11 +301,15 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
 
         POLY_DEGREE = 12
-        MUS = jnp.linspace(0.01, 1, 40, endpoint=True)
-        c, alpha = prior_params['u']
-        power2_profile = get_I_power2(c, alpha, MUS)
-        u_poly = calc_poly_coeffs(mus, power2_profile,  
-                              poly_degree = degree)
+        MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+        u_theory = prior_params['u']
+        c1_mu, c2_mu = u_theory[0], u_theory[1]
+        c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.2, low=0.0, high=1.0))
+        c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.2, low=0.0, high=1.0))
+        power2_profile = get_I_power2(c1, c2, MUS)
+        u_poly = calc_poly_coeffs(MUS, power2_profile,
+                              poly_degree = POLY_DEGREE)
+        u = numpyro.deterministic('u', u_poly)
         #u = numpyro.sample("u", distx.QuadLDParams())
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-5), jnp.log(1e-2)))
         error = numpyro.deterministic('error', jnp.sqrt(jnp.exp(log_jitter)**2 + yerr**2))
@@ -443,14 +447,18 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         error_broadcast = total_error[:, None] * jnp.ones_like(t)
 
         if ld_mode == 'free':
-            POLY_DEGREE = 12
-            MUS = jnp.linspace(0.01, 1, 40, endpoint=True)
-            def compute_u_poly_for_one_bin(c_alpha):
-                c, alpha = c_alpha
-                power2_profile = get_I_power2(c, alpha, MUS)
-                return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-            u_poly_all = jax.vmap(compute_u_poly_for_one_bin)(mu_u_ld)
-            u = numpyro.deterministic("u", u_poly_all)
+                    POLY_DEGREE = 12
+        MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+        u_theory = prior_params['u']
+        c1_mu, c2_mu = u_theory[0], u_theory[1]
+        c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.2, low=0.0, high=1.0))
+        c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.2, low=0.0, high=1.0))
+        def compute_one_lc_u(c1, c2):
+            power2_profile = get_I_power2(c1, c2, MUS)
+            return calc_poly_coeffs(MUS, power2_profile,
+                              poly_degree = POLY_DEGREE)
+            u_poly_all = jax.vmap(compute_one_lc_u)(c1_mu, c2_mu)
+            u = numpyro.deterministic('u', u_poly_all)
         elif ld_mode == 'fixed':
             u = numpyro.deterministic("u", ld_fixed)
         elif ld_mode == 'interpolated':
