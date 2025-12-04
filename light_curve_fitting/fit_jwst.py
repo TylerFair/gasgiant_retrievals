@@ -27,6 +27,7 @@ import arviz as az
 from jwstdata import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
 import matplotlib.gridspec as gridspec
+from jaxoplanet.experimental import calc_poly_coeffs
 #pd.set_option('display.max_columns', None)
 #pd.set_option('display.max_rows', None)
 import tinygp
@@ -123,6 +124,9 @@ def plot_noise_binning(residuals, outpath, title=None, to_ppm=True, show_per_cha
 
 def spot_crossing(t, amp, mu, sigma):
     return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
+
+def get_I_power2(c, alpha, u):
+    return 1 - c*(1-jnp.power(u,alpha))
 
 def _compute_transit_model(params, t):
     """Transit Model for one or more planets, using vmap for performance."""
@@ -280,7 +284,7 @@ def loss(params, t, y, error):
     gp = build_gp(params, t, error)
     return -gp.log_probability(y)
 
-def create_whitelight_model(detrend_type='linear', n_planets=1):
+def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}' for {n_planets} planets")
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
 
@@ -296,7 +300,21 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
             depths = numpyro.sample(f'depths_{i}', dist.Uniform(1e-5, 0.5))
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
 
-        u = numpyro.sample("u", distx.QuadLDParams())
+        if ld_profile == 'quadratic':
+            u = numpyro.sample("u", distx.QuadLDParams())
+        elif ld_profile == 'power2':
+            POLY_DEGREE = 12
+            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+            u_theory = prior_params['u']
+            c1_mu, c2_mu = u_theory[0], u_theory[1]
+            c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
+            c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
+            power2_profile = get_I_power2(c1, c2, MUS)
+            u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+            u = numpyro.deterministic('u', u_poly)
+        else:
+            raise ValueError(f"Unknown ld_profile: {ld_profile}")
+
         log_jitter = numpyro.sample('log_jitter', dist.Uniform(jnp.log(1e-5), jnp.log(1e-2)))
         error = numpyro.deterministic('error', jnp.sqrt(jnp.exp(log_jitter)**2 + yerr**2))
 
@@ -376,7 +394,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1):
 
     return _whitelight_model_static
 
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1):
+def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1, ld_profile='quadratic'):
     print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', trend='{trend_mode}' for {n_planets} planets")
 
     if detrend_type == 'linear':
@@ -433,7 +451,26 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         error_broadcast = total_error[:, None] * jnp.ones_like(t)
 
         if ld_mode == 'free':
-            u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
+            if ld_profile == 'quadratic':
+                u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
+            elif ld_profile == 'power2':
+                POLY_DEGREE = 12
+                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+                # mu_u_ld is passed in, expecting shape (num_lcs, 2)
+                c1_mu = mu_u_ld[:, 0]
+                c2_mu = mu_u_ld[:, 1]
+
+                c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
+                c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
+
+                def compute_one_lc_u(c1_val, c2_val):
+                    power2_profile = get_I_power2(c1_val, c2_val, MUS)
+                    return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+
+                u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
+                u = numpyro.deterministic('u', u_poly_all)
+            else:
+                raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'fixed':
             u = numpyro.deterministic("u", ld_fixed)
         elif ld_mode == 'interpolated':
@@ -581,7 +618,7 @@ def compute_aic(n, residuals, k):
     aic = 2*k + n * np.log(rss/n)
     return aic
 
-def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None):
+def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None, ld_profile='quadratic'):
     if instrument == 'NIRSPEC/G395H':
         mode = "JWST_NIRSpec_G395H"
         wl_min, wl_max = 28700.0, 51700.0
@@ -630,20 +667,38 @@ def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None)
                 range_min = intended_min
                 range_max = intended_max
 
-            U_mu.append(sld.compute_quadratic_ld_coeffs(
-                wavelength_range=[range_min, range_max],
-                mode=mode,
-                return_sigmas=False
-            ))
+            if ld_profile == 'quadratic':
+                U_mu.append(sld.compute_quadratic_ld_coeffs(
+                    wavelength_range=[range_min, range_max],
+                    mode=mode,
+                    return_sigmas=False
+                ))
+            elif ld_profile == 'power2':
+                U_mu.append(sld.compute_power2_ld_coeffs(
+                    wavelength_range=[range_min, range_max],
+                    mode=mode,
+                    return_sigmas=False
+                ))
+            else:
+                raise ValueError(f"Unknown ld_profile: {ld_profile}")
         U_mu = jnp.array(U_mu)
     else:
         wl_range_clipped = [max(min(wavelengths)*1e4, wl_min),
                            min(max(wavelengths)*1e4, wl_max)]
-        U_mu = sld.compute_quadratic_ld_coeffs(
-            wavelength_range=wl_range_clipped,
-            mode=mode,
-            return_sigmas=False
-        )
+        if ld_profile == 'quadratic':
+            U_mu = sld.compute_quadratic_ld_coeffs(
+                wavelength_range=wl_range_clipped,
+                mode=mode,
+                return_sigmas=False
+            )
+        elif ld_profile == 'power2':
+            U_mu = sld.compute_power2_ld_coeffs(
+                wavelength_range=wl_range_clipped,
+                mode=mode,
+                return_sigmas=False
+            )
+        else:
+            raise ValueError(f"Unknown ld_profile: {ld_profile}")
         U_mu = jnp.array(U_mu)
     return U_mu
 
@@ -719,6 +774,14 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
             'u2': np.nanmedian(samples['u'][:, i, 1]),
             'u2_err': np.std(samples['u'][:, i, 1]),
         }
+
+        if 'c1' in samples:
+            row['c1'] = np.nanmedian(samples['c1'][:, i])
+            row['c1_err'] = np.std(samples['c1'][:, i])
+        if 'c2' in samples:
+            row['c2'] = np.nanmedian(samples['c2'][:, i])
+            row['c2_err'] = np.std(samples['c2'][:, i])
+
         if detrend_type != 'none':
             row['c'] = np.nanmedian(samples['c'][:, i])
             row['c_err'] = np.std(samples['c'][:, i])
@@ -1009,6 +1072,9 @@ def main():
     spot_sigma = flags.get('spot_width', 0.0)
     save_trace = flags.get('save_whitelight_trace', False)
 
+    # --- New LD Profile Flag ---
+    ld_profile = flags.get('ld_profile', 'quadratic') # default to quadratic if not specified
+
     whitelight_sigma = outlier_clip.get('whitelight_sigma', 4)
     spectroscopic_sigma = outlier_clip.get('spectroscopic_sigma', 4)
 
@@ -1083,9 +1149,9 @@ def main():
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
     if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
-        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument)
+        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument, ld_profile=ld_profile)
     elif instrument == 'NIRISS/SOSS':
-        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order)
+        U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile)
 
     # ----------------------------------------------------
     # WHITELIGHT FITTING
@@ -1104,14 +1170,23 @@ def main():
             if 'spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
 
+            # Pass LD coefficients to hyper_params if using power2
+            if ld_profile == 'power2':
+                hyper_params_wl['u'] = U_mu_wl[0] # assuming single wl bin for whitelight
+
             init_params_wl = {
-                'u': U_mu_wl,
                 'c': 1.0,
                 'v': 0.0,
                 'log_jitter': jnp.log(1e-4),
                 'b': PRIOR_B,
                 'rors': PRIOR_RPRS
             }
+            if ld_profile == 'quadratic':
+                init_params_wl['u'] = U_mu_wl
+
+            # (Note: for power2, u is deterministic from c1/c2 sample, so we don't init 'u' directly in the same way,
+            # but create_whitelight_model handles sampling c1, c2)
+
             for i in range(n_planets):
                 init_params_wl[f'logD_{i}'] = jnp.log(PRIOR_DUR[i])
                 init_params_wl[f't0_{i}'] = PRIOR_T0[i]
@@ -1132,16 +1207,17 @@ def main():
             if 'linear_discontinuity' in detrending_type:
                 init_params_wl['t_jump'] = 59791.12
                 init_params_wl['jump'] = -0.001 
-            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
+
+            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
             
             # Special logic for Spot Sliding Window - only if purely spot model
             if detrending_type == 'spot':
-                whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets) # Temp
+                whitelight_model_for_run = create_whitelight_model(detrend_type='linear', n_planets=n_planets, ld_profile=ld_profile) # Temp
                 # ... [Slider code omitted for brevity as it was specific to pure spot] ...
 
             if 'gp' in detrending_type:
                 print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
-                whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets)
+                whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets, ld_profile=ld_profile)
                 init_params_prefit = init_params_wl.copy()
                 init_params_prefit.pop('GP_log_sigma', None)
                 init_params_prefit.pop('GP_log_rho', None)
@@ -1155,7 +1231,7 @@ def main():
                 print("Please make sure config is CPU for GP whitelight fit!")
                 init_params_wl['GP_log_sigma'] = jnp.log(5.0 * jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_rho'] = jnp.log(0.1)
-                whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets)
+                whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
                 soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(
                     key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
                 )
@@ -1619,9 +1695,9 @@ def main():
         DEPTHS_BASE_LR = jnp.tile(DEPTH_BASE, (num_lcs_lr, 1))
 
         if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS']:
-            U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr , instrument)
+            U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr , instrument, ld_profile=ld_profile)
         elif instrument == 'NIRISS/SOSS':
-            U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order)
+            U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order, ld_profile=ld_profile)
 
         init_params_lr = {
             "u": U_mu_lr,
@@ -1644,7 +1720,8 @@ def main():
             detrend_type=detrend_type_multiwave,
             ld_mode=lr_ld_mode,
             trend_mode=lr_trend_mode,
-            n_planets=n_planets
+            n_planets=n_planets,
+            ld_profile=ld_profile
         )
 
         model_run_args_lr = {
@@ -1654,6 +1731,7 @@ def main():
             'mu_depths': DEPTHS_BASE_LR,
             'PERIOD': PERIOD_FIXED,
         }
+
         if lr_ld_mode == 'fixed': model_run_args_lr['ld_fixed'] = U_mu_lr
         if lr_ld_mode == 'free': model_run_args_lr['mu_u_ld'] = U_mu_lr
         
@@ -1800,9 +1878,9 @@ def main():
         model_run_args_hr['ld_interpolated'] = ld_interpolated_hr
     elif hr_ld_mode == 'fixed' or hr_ld_mode == 'free':
         if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS']:
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument)
+            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, ld_profile=ld_profile)
         elif instrument == 'NIRISS/SOSS':
-            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order)
+            U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile)
         if hr_ld_mode == 'fixed': model_run_args_hr['ld_fixed'] = U_mu_hr_init
         else: model_run_args_hr['mu_u_ld'] = U_mu_hr_init
 
@@ -1825,7 +1903,13 @@ def main():
             if 'v' in bestfit_params_wl_df.columns:
                  init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
 
-    hr_model_for_run = create_vectorized_model(detrend_type=detrend_type_multiwave, ld_mode=hr_ld_mode, trend_mode=hr_trend_mode, n_planets=n_planets)
+    hr_model_for_run = create_vectorized_model(
+        detrend_type=detrend_type_multiwave,
+        ld_mode=hr_ld_mode,
+        trend_mode=hr_trend_mode,
+        n_planets=n_planets,
+        ld_profile=ld_profile
+    )
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
         model_run_args_hr['gp_trend'] = gp_trend
@@ -1889,4 +1973,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
