@@ -18,7 +18,7 @@ mpl.rcParams['axes.linewidth'] = 1.7
 from jaxoplanet.light_curves import limb_dark_light_curve
 from jaxoplanet.orbits.transit import TransitOrbit
 from exotic_ld import StellarLimbDarkening
-from plotting_lineartrend import plot_map_fits, plot_map_residuals, plot_transmission_spectrum, plot_wavelength_offset_summary
+from plotting import plot_map_fits, plot_map_residuals, plot_transmission_spectrum, plot_wavelength_offset_summary
 import new_unpack
 import argparse
 import yaml
