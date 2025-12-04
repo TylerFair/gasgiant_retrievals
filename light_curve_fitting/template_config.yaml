@@ -1,14 +1,14 @@
 # Auto-generated config for HAT-P-18
-# Transit time (t0) automatically assigned: 59743.353393
+# Transit time (t0) automatically assigned: 60795.39
 
 planet:
   name: HAT-P-18
   period: 5.50802941
   duration: 0.10999997916666666
-  t0: 59743.353393
+  t0: 60795.39
   b: 0.148
   rprs: 0.1356
-  
+
 stellar:
   feh: 0.10
   teff: 4803.0
@@ -16,12 +16,13 @@ stellar:
   ld_model: "stagger"
   ld_data_path: "../exotic_ld_data"
 
-instrument: 'NIRISS/SOSS'
+instrument: 'NIRSPEC/G395M'
 order: 1
-path: 'placeholder'
+nrs: 1
+path: '<directory>'
 input_dir: 'FITS'
-output_dir: 'HAT-P-18_SOSS_FREELD_EXPLINEAR'
-fits_file: 'HAT-P-18_box_spectra_fullres.fits'
+output_dir: '<output>'
+fits_file: '<fits_file>'
 resolution:
   high: 'reference'
   low: 20
@@ -36,11 +37,9 @@ flags:
   mask_end: jnp.min(t) + 0.020833
   mask_integrations_start: None
   #mask_integrations_end:
+  ld_profile: 'power2'
 outlier_clip:
   whitelight_sigma: 4
   spectroscopic_sigma: 4
 
 host_device: "cpu"
-
-
-
