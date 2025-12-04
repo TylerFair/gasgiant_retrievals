@@ -692,8 +692,7 @@ def main():
             if 'spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
 
-            if ld_profile == 'power2':
-                hyper_params_wl['u'] = U_mu_wl
+            hyper_params_wl['u'] = U_mu_wl
 
             init_params_wl = {
                 'c': 1.0,
@@ -702,8 +701,7 @@ def main():
                 'b': PRIOR_B,
                 'rors': PRIOR_RPRS
             }
-            if ld_profile == 'quadratic':
-                init_params_wl['u'] = U_mu_wl
+            init_params_wl['u'] = U_mu_wl
 
             for i in range(n_planets):
                 init_params_wl[f'logD_{i}'] = jnp.log(PRIOR_DUR[i])
@@ -970,12 +968,6 @@ def main():
             transit_only_model = compute_transit_model(bestfit_params_wl, t_masked) + 1.0
             residuals_detrended = detrended_flux - transit_only_model 
 
-            # ... [Plotting code omitted for brevity but logic is identical] ...
-            # I will preserve the plotting code from the original file by just copying the blocks I read
-            # But since I am using overwrite_file_with_block, I have to provide the FULL content.
-            # I will assume the previous read content was complete.
-
-            # --- Re-inserting the summary plot code ---
             fig = plt.figure(figsize=(16, 14))
             b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
                                                 jnp.array(data.wl_flux), 
