@@ -470,9 +470,20 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'fixed':
-            u = numpyro.deterministic("u", ld_fixed)
-        elif ld_mode == 'interpolated':
-            u = numpyro.deterministic("u", ld_interpolated)
+            if ld_profile == 'quadratic':
+                u = numpyro.deterministic('u', ld_fixed)
+            elif ld_profile == 'power2':
+                POLY_DEGREE = 12
+                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+                c1_mu = ld_fixed[:, 0]
+                c2_mu = ld_fixed[:, 1]
+                def compute_one_lc_u(c1_val, c2_val):
+                    power2_profile = get_I_power2(c1_val, c2_val, MUS)
+                    return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+                u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
+                u = numpyro.deterministic('u', u_poly_all)
+        #elif ld_mode == 'interpolated':
+        #    u = numpyro.deterministic("u", ld_interpolated)
         else:
             raise ValueError(f"Unknown ld_mode: {ld_mode}")
 
@@ -897,15 +908,6 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                 elif detrend_type == 'spot':
                     spot_term = spot_crossing(time, map_params['spot_amp'][i], map_params['spot_mu'][i], map_params['spot_sigma'][i])
                     trend = c_i + v_i * t_shift + spot_term
-        
-        # The transit model is flux, so the trend needs to be subtracted from the data.
-        # The light curve model is transit_model + trend.
-        # So detrended flux is raw_flux - trend.
-        # The transit_model is the (planet_flux - 1), so the full model is (transit_model+1) + (trend-1)
-        # Let's adjust this. The `compute_lc` functions return `_compute_transit_model + trend`.
-        # `_compute_transit_model` returns values centered at 0 for the transit.
-        # So the final model is `total_model_flux + trend`.
-        # And detrended flux is `flux[i] - trend`. This looks correct.
         
         full_model = transit_model + trend
         detrended_flux = flux[i] - trend
