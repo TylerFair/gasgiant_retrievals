@@ -24,7 +24,7 @@ import argparse
 import yaml
 import jaxopt
 import arviz as az
-from S1_createdatacube import SpectroData, process_spectroscopy_data
+from createdatacube import SpectroData, process_spectroscopy_data
 from matplotlib.widgets import Slider, Button, TextBox
 import matplotlib.gridspec as gridspec
 from jaxoplanet.experimental import calc_poly_coeffs
