@@ -139,6 +139,7 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
     mcmc = numpyro.infer.MCMC(
         numpyro.infer.NUTS(
             model,
+            #dense_mass=True,
             regularize_mass_matrix=False,
             init_strategy=numpyro.infer.init_to_value(values=init_params),
             target_accept_prob=0.9
@@ -750,7 +751,7 @@ def main():
                 soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(whitelight_model_for_run, regularize_mass_matrix=False, init_strategy=numpyro.infer.init_to_value(values=soln), target_accept_prob=0.9),
-                num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True
+                num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True, chain_method='vectorized'
             )
             mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             inf_data = az.from_numpyro(mcmc)
