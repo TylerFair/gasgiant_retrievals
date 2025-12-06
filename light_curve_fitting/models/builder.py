@@ -35,7 +35,30 @@ COMPUTE_KERNELS = {
     'spot_spectroscopic': compute_lc_spot_spectroscopic,
     'linear_discontinuity_spectroscopic': compute_lc_linear_discontinuity_spectroscopic,
 }
-
+def check_ld_physicality(c, alpha):
+    """
+    Enforces physicality based on Verma et al. (2024):
+    1. 0 < I(mu) < 1 for all mu
+    2. dI/dmu > 0 (Monotonicity)
+    """
+    # Create a grid of mu values for checking
+    # Verma et al. use 100 points, 20 is usually sufficient for penalty
+    mu_grid = jnp.linspace(0.01, 1.0, 100) 
+    
+    profile = get_I_power2(c, alpha, mu_grid)
+    
+    # Condition 1: Bounded Intensity (0 to 1)
+    # Note: We check profile > 0 and profile < 1
+    # Adding a small epsilon tolerance can help numerical stability
+    is_bounded = jnp.all((profile >= 0.0) & (profile <= 1.0))
+    
+    # Condition 2: Monotonicity (derivative > 0)
+    # We check if the profile is strictly increasing from limb to center
+    diffs = jnp.diff(profile)
+    is_monotonic = jnp.all(diffs >= 0.0)
+    
+    return is_bounded & is_monotonic
+    
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}' for {n_planets} planets")
 
@@ -63,6 +86,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             c1_mu, c2_mu = u_theory[0], u_theory[1]
             c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
             c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
+            is_physical = check_ld_physicality(c1, c2)
+            # If physical, log_prob += 0. If unphysical, log_prob += -inf
+            numpyro.factor("ld_physicality", jnp.log(jnp.where(is_physical, 1.0, 0.0)))
             power2_profile = get_I_power2(c1, c2, MUS)
             u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
             u = numpyro.deterministic('u', u_poly)
@@ -175,12 +201,32 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 c2_mu = mu_u_ld[:, 1]
                 c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
                 c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
-
+                
                 def compute_one_lc_u(c1_val, c2_val):
+                    # Calculate profile for poly fitting
                     power2_profile = get_I_power2(c1_val, c2_val, MUS)
-                    return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+                    coeffs = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+                    
+                    # Calculate physicality check 
+                    # Using a coarser grid for check to save VRAM/Compute
+                    mu_check = jnp.linspace(0.01, 1.0, 100)
+                    check_profile = get_I_power2(c1_val, c2_val, mu_check)
+                    
+                    is_bounded = jnp.all((check_profile >= 0.0) & (check_profile <= 1.0))
+                    is_monotonic = jnp.all(jnp.diff(check_profile) >= 0.0)
+                    
+                    validity = is_bounded & is_monotonic
+                    
+                    return coeffs, validity
 
-                u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
+                u_poly_all, validity_all = jax.vmap(compute_one_lc_u)(c1, c2)
+                # 5. Apply the Factor GLOBALLY
+                # We want *every* wavelength bin to be physical.
+                # If any single bin is unphysical, we penalize the chain.
+                # summing the logs is equivalent to AND-ing the probabilities.
+                # 1.0 if valid, 0.0 if invalid -> log(1)=0, log(0)=-inf
+                total_log_prob = jnp.sum(jnp.log(jnp.where(validity_all, 1.0, 0.0)))
+                numpyro.factor("ld_physicality_global", total_log_prob)
                 u = numpyro.deterministic('u', u_poly_all)
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
