@@ -34,7 +34,7 @@ from jaxoplanet.experimental import calc_poly_coeffs
 import tinygp
 
 # Import Modularized Models
-from models.core import _to_f64, _tree_to_f64, compute_transit_model
+from models.core import _to_f64, _tree_to_f64, compute_transit_model, get_I_power2
 from models.trends import (
     spot_crossing, compute_lc_linear, compute_lc_quadratic, compute_lc_cubic,
     compute_lc_quartic, compute_lc_linear_discontinuity, compute_lc_explinear,
@@ -318,9 +318,16 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
         if 'c1' in samples:
             row['c1'] = np.nanmedian(samples['c1'][:, i])
             row['c1_err'] = np.std(samples['c1'][:, i])
+            # Override u1/u2 with physical parameters for power2 profile
+            row['u1'] = row['c1']
+            row['u1_err'] = row['c1_err']
+
         if 'c2' in samples:
             row['c2'] = np.nanmedian(samples['c2'][:, i])
             row['c2_err'] = np.std(samples['c2'][:, i])
+            # Override u1/u2 with physical parameters for power2 profile
+            row['u2'] = row['c2']
+            row['u2_err'] = row['c2_err']
 
         if detrend_type != 'none':
             row['c'] = np.nanmedian(samples['c'][:, i])
@@ -764,8 +771,18 @@ def main():
             # ------------------------------------------------
             bestfit_params_wl = {
                 'period': PERIOD_FIXED,
-                'u': jnp.nanmedian(wl_samples['u'], axis=0),
             }
+            if 'c1' in wl_samples and ld_profile == 'power2':
+                bestfit_params_wl['c1'] = jnp.nanmedian(wl_samples['c1'], axis=0)
+                bestfit_params_wl['c2'] = jnp.nanmedian(wl_samples['c2'], axis=0)
+                
+                POLY_DEGREE = 12
+                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+                power2_profile = get_I_power2(bestfit_params_wl['c1'], bestfit_params_wl['c2'], MUS)
+                u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+                bestfit_params_wl['u'] = u_poly
+            else:
+                bestfit_params_wl['u'] = jnp.nanmedian(wl_samples['u'], axis=0)
 
             durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
             durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
@@ -1098,8 +1115,14 @@ def main():
                     row['c'] = bestfit_params_wl['c']
                     if 'v' in bestfit_params_wl: row['v'] = bestfit_params_wl['v']
                 
-                row['u1'] = bestfit_params_wl['u'][0]
-                row['u2'] = bestfit_params_wl['u'][1]
+                if 'c1' in bestfit_params_wl:
+                    row['u1'] = bestfit_params_wl['c1']
+                    row['u2'] = bestfit_params_wl['c2']
+                    row['c1'] = bestfit_params_wl['c1']
+                    row['c2'] = bestfit_params_wl['c2']
+                else:
+                    row['u1'] = bestfit_params_wl['u'][0]
+                    row['u2'] = bestfit_params_wl['u'][1]
                 
                 if 'explinear' in detrending_type:
                     row['A'] = bestfit_params_wl['A']
@@ -1234,9 +1257,23 @@ def main():
         map_params_lr = {
             "duration": DURATION_BASE, "t0": T0_BASE, "b": B_BASE,
             "rors": jnp.nanmedian(samples_lr["rors"], axis=0), 
-            "u": jnp.nanmedian(ld_u_lr, axis=0),  
             "period": PERIOD_FIXED,
         }
+        
+        if ld_profile == 'power2':
+            c1_med = jnp.nanmedian(samples_lr['c1'], axis=0)
+            c2_med = jnp.nanmedian(samples_lr['c2'], axis=0)
+            POLY_DEGREE = 12
+            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+            
+            def compute_u_from_c(c1, c2):
+                 profile = get_I_power2(c1, c2, MUS)
+                 return calc_poly_coeffs(MUS, profile, poly_degree=POLY_DEGREE)
+            
+            map_params_lr['u'] = jax.vmap(compute_u_from_c)(c1_med, c2_med)
+        else:
+            map_params_lr['u'] = jnp.nanmedian(ld_u_lr, axis=0)
+
         if detrend_type_multiwave != 'none':
             map_params_lr['c'] = jnp.nanmedian(samples_lr["c"], axis=0)
             if 'v' in samples_lr: 
@@ -1305,8 +1342,19 @@ def main():
 
         if interpolate_ld:
             print("Fitting polynomials to limb darkening coefficients...")
-            best_poly_coeffs_u1, best_order_u1, _ = fit_polynomial(wl_lr, ld_u_lr[:, :, 0], poly_orders)
-            best_poly_coeffs_u2, best_order_u2, _ = fit_polynomial(wl_lr, ld_u_lr[:, :, 1], poly_orders)
+            if ld_profile == 'power2':
+                # Use c1 and c2 from samples
+                c1_lr = np.array(samples_lr['c1'])
+                c2_lr = np.array(samples_lr['c2'])
+                best_poly_coeffs_u1, best_order_u1, _ = fit_polynomial(wl_lr, c1_lr, poly_orders)
+                best_poly_coeffs_u2, best_order_u2, _ = fit_polynomial(wl_lr, c2_lr, poly_orders)
+                plot_poly_fit(wl_lr, c1_lr, best_poly_coeffs_u1, best_order_u1, "Wavelength", "c1", "Limb Darkening c1", f"{output_dir}/2opt_c1.png")
+                plot_poly_fit(wl_lr, c2_lr, best_poly_coeffs_u2, best_order_u2, "Wavelength", "c2", "Limb Darkening c2", f"{output_dir}/2opt_c2.png")
+            else:
+                best_poly_coeffs_u1, best_order_u1, _ = fit_polynomial(wl_lr, ld_u_lr[:, :, 0], poly_orders)
+                best_poly_coeffs_u2, best_order_u2, _ = fit_polynomial(wl_lr, ld_u_lr[:, :, 1], poly_orders)
+                plot_poly_fit(wl_lr, ld_u_lr[:, :, 0], best_poly_coeffs_u1, best_order_u1, "Wavelength", "u1", "Limb Darkening u1", f"{output_dir}/2opt_u1.png")
+                plot_poly_fit(wl_lr, ld_u_lr[:, :, 1], best_poly_coeffs_u2, best_order_u2, "Wavelength", "u2", "Limb Darkening u2", f"{output_dir}/2opt_u2.png")
 
         plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
@@ -1350,7 +1398,22 @@ def main():
     if hr_ld_mode == 'interpolated':
         u1_interp_hr = np.polyval(best_poly_coeffs_u1, wl_hr)
         u2_interp_hr = np.polyval(best_poly_coeffs_u2, wl_hr)
-        ld_interpolated_hr = jnp.array(np.column_stack((u1_interp_hr, u2_interp_hr)))
+        
+        if ld_profile == 'power2':
+            # u1_interp_hr corresponds to c1, u2 to c2
+            # We need to reconstruct the polynomial u from these
+            POLY_DEGREE = 12
+            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+            
+            def compute_one_lc_u_interp(c1_val, c2_val):
+                 power2_profile = get_I_power2(c1_val, c2_val, MUS)
+                 return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+            
+            # Use vmap to do it for all wavelengths
+            ld_interpolated_hr = jax.vmap(compute_one_lc_u_interp)(jnp.array(u1_interp_hr), jnp.array(u2_interp_hr))
+        else:
+            ld_interpolated_hr = jnp.array(np.column_stack((u1_interp_hr, u2_interp_hr)))
+            
         model_run_args_hr['ld_interpolated'] = ld_interpolated_hr
     elif hr_ld_mode == 'fixed' or hr_ld_mode == 'free':
         if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS']:
@@ -1404,8 +1467,25 @@ def main():
         "rors": jnp.nanmedian(samples_hr["rors"], axis=0), 
         "period": PERIOD_FIXED
     }
-    if "u" in samples_hr: 
+    if "u" in samples_hr and ld_profile != 'power2': 
         map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
+    elif "u" in samples_hr and ld_profile == 'power2':
+        # Reconstruct u from c1/c2 medians for high-res
+        # Note: samples_hr['u'] contains polynomial coefficients, but we want to use c1/c2 if available
+        # But wait, create_vectorized_model samples c1/c2 for power2.
+        # Let's check if c1/c2 are in samples_hr
+        if 'c1' in samples_hr:
+            c1_med_hr = jnp.nanmedian(samples_hr['c1'], axis=0)
+            c2_med_hr = jnp.nanmedian(samples_hr['c2'], axis=0)
+            POLY_DEGREE = 12
+            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+            def compute_u_from_c(c1, c2):
+                 profile = get_I_power2(c1, c2, MUS)
+                 return calc_poly_coeffs(MUS, profile, poly_degree=POLY_DEGREE)
+            map_params_hr['u'] = jax.vmap(compute_u_from_c)(c1_med_hr, c2_med_hr)
+        else:
+            # Fallback if c1/c2 not found (should not happen for power2)
+             map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
     if "c" in samples_hr: 
         map_params_hr["c"] = jnp.nanmedian(samples_hr["c"], axis=0)
     if "v" in samples_hr: 
