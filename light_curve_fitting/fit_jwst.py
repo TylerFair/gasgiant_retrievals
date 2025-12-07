@@ -273,7 +273,7 @@ def plot_poly_fit(x, y, coeffs, order, xlabel, ylabel, title, save_path):
     plt.close(fig)
     print(f"Saved polynomial fit plot to {save_path}")
 
-def save_results(wavelengths, samples, csv_filename):
+def save_results(wavelengths,wavelength_err,  samples, csv_filename):
     depth_chain = samples['rors']**2
     depth_median = np.nanmedian(depth_chain, axis=0)
     depth_err = np.std(depth_chain, axis=0)
@@ -282,11 +282,13 @@ def save_results(wavelengths, samples, csv_filename):
         depth_err = depth_err[:, np.newaxis]
     n_planets = depth_median.shape[1]
     header_cols = ["wavelength"]
+    header_cols = header_cols.append("wavelength_err")
     for i in range(n_planets):
         header_cols.append(f"depth{i:02d}")
         header_cols.append(f"depth_err{i:02d}")
     header = ",".join(header_cols)
     output_cols = [wavelengths]
+    output_cols = [wavelength_err]
     for i in range(n_planets):
         output_cols.append(depth_median[:, i])
         output_cols.append(depth_err[:, i])
@@ -682,7 +684,10 @@ def main():
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument, ld_profile=ld_profile)
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile)
-
+    #print(U_mu_wl)
+    #print(get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order, ld_profile=ld_profile))
+    #print(get_limb_darkening(sld, data.wavelengths_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile))
+    #exit()
     # ----------------------------------------------------
     # WHITELIGHT FITTING
     # ----------------------------------------------------
@@ -1357,7 +1362,7 @@ def main():
                 plot_poly_fit(wl_lr, ld_u_lr[:, :, 1], best_poly_coeffs_u2, best_order_u2, "Wavelength", "u2", "Limb Darkening u2", f"{output_dir}/2opt_u2.png")
 
         plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
-        save_results(wl_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
+        save_results(wl_lr, data.wavelengths_err_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
         save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
     # ----------------------------------------------------
@@ -1522,10 +1527,11 @@ def main():
                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend)
 
     plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
-    save_results(wl_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
+    save_results(wl_hr, data.wavelengths_err_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
     save_detailed_fit_results(time_hr, flux_hr, flux_err_hr, data.wavelengths_hr, data.wavelengths_err_hr, samples_hr, map_params_hr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{hr_bin_str}", median_total_error_hr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
     
     print("\nAnalysis complete!")
 
 if __name__ == "__main__":
     main()
+
