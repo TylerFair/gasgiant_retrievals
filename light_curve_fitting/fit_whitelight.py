@@ -424,6 +424,58 @@ def run_beta_monte_carlo(residuals, dt, n_sims=500):
     rms_high_2sig = np.percentile(all_sim_rms, 95, axis=0)
 
     return np.array(mc_betas), rms_low_1sig, rms_high_1sig, rms_low_2sig, rms_high_2sig
+
+def plot_comparison_16(results, output_dir, instrument_full_str):
+    fig = plt.figure(figsize=(16, 12))
+    gs = gridspec.GridSpec(2, 2, figure=fig)
+    
+    detrend_types = list(results.keys())
+    
+    for i, dtype in enumerate(detrend_types):
+        res = results[dtype]
+        
+        # RMS Plot (Top Row)
+        ax_rms = fig.add_subplot(gs[0, i])
+        ax_rms.loglog(res['bin_sizes_min'], res['expected_rms'] * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
+        
+        ax_rms.fill_between(res['bin_sizes_min'], res['rms_lo_2'] * 1e6, res['rms_hi_2'] * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
+        ax_rms.fill_between(res['bin_sizes_min'], res['rms_lo_1'] * 1e6, res['rms_hi_1'] * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
+        ax_rms.loglog(res['bin_sizes_min'], res['measured_rms'] * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={res["beta"]:.2f})')
+        ax_rms.set_xlabel('Bin Size (minutes)', fontsize=12)
+        ax_rms.set_ylabel('RMS (ppm)', fontsize=12)
+        ax_rms.set_title(f'Time-Correlated Noise ({dtype})', fontsize=14)
+        ax_rms.grid(True, which="both", alpha=0.2)
+
+        # Beta Hist (Bottom Row)
+        ax_beta = fig.add_subplot(gs[1, i])
+        mc_betas = res['mc_betas']
+        mu_sim = res['mu_sim']
+        std_sim = res['std_sim']
+        beta = res['beta']
+        z_score = res['z_score']
+
+        n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
+        
+        xmin, xmax = ax_beta.get_xlim()
+        x_plot = np.linspace(xmin, xmax, 100)
+        p_plot = norm.pdf(x_plot, mu_sim, std_sim)
+        ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
+
+        ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
+
+        sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
+        ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
+                    transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
+
+        ax_beta.set_xlabel('Beta Factor', fontsize=12)
+        ax_beta.set_ylabel('Probability Density', fontsize=12)
+        ax_beta.set_title(f"Beta Significance Test ({dtype}) (Beta={res["beta"]:.2f})", fontsize=14)
+        if i == 0: ax_beta.legend()
+
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/16_{instrument_full_str}_comparison.png')
+    plt.close(fig)
+
 # ---------------------
 # Main Analysis
 # ---------------------
@@ -470,7 +522,9 @@ def main():
     numpyro.set_platform(host_device)
     key_master = jax.random.PRNGKey(555)
 
-    detrending_type = flags.get('detrending_type', 'linear')
+    # Force specific detrend types for comparison
+    detrend_types_to_run = ['linear', 'explinear']
+    
     interpolate_trend = flags.get('interpolate_trend', False)
     interpolate_ld = flags.get('interpolate_ld', False)
     fix_ld = flags.get('fix_ld', False)
@@ -538,497 +592,488 @@ def main():
     print("Data loaded.")
     print(f"Time: {data.time.shape}")
      
-    stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
-
+    # This check assumes existing files are from the config's detrend_type
+    # Since we are overriding, we will just proceed, but we can reuse the LD calculation
     if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned,0.0, instrument, ld_profile=ld_profile)
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile)
-    #print(U_mu_wl)
-    #print(get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order, ld_profile=ld_profile))
-    #print(get_limb_darkening(sld, data.wavelengths_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile))
-    #exit()
-    # ----------------------------------------------------
-    # WHITELIGHT FITTING
-    # ----------------------------------------------------
-    if not stringcheck or ('gp' in detrending_type):
-        if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
-            plt.scatter(data.wl_time, data.wl_flux)
-            plt.savefig('stuff.png')
-            plt.close()
-            print('Fitting whitelight for outliers and bestfit parameters')
-            hyper_params_wl = {
-                "duration": PRIOR_DUR,
-                "t0": PRIOR_T0,
-                'period': PERIOD_FIXED,
-            }
-            if 'spot' in detrending_type:
-                hyper_params_wl['spot_guess'] = spot_mu
 
-            hyper_params_wl['u'] = U_mu_wl
+    comparison_results = {}
 
-            init_params_wl = {
-                'c': 1.0,
-                'v': 0.0,
-                'log_jitter': jnp.log(1e-4),
-                'b': PRIOR_B,
-                'rors': PRIOR_RPRS
-            }
-            init_params_wl['u'] = U_mu_wl
-
-            for i in range(n_planets):
-                init_params_wl[f'logD_{i}'] = jnp.log(PRIOR_DUR[i])
-                init_params_wl[f't0_{i}'] = PRIOR_T0[i]
-                init_params_wl[f'_b_{i}'] = PRIOR_B[i]
-                init_params_wl[f'depths_{i}'] = PRIOR_DEPTH[i]
-
-            if 'quadratic' in detrending_type:
-                init_params_wl['v2'] = 0.0
-            if 'cubic' in detrending_type:
-                init_params_wl['v2'] = 0.0; init_params_wl['v3'] = 0.0
-            if 'quartic' in detrending_type:
-                init_params_wl['v2'] = 0.0; init_params_wl['v3'] = 0.0; init_params_wl['v4'] = 0.0
-            if 'explinear' in detrending_type:
-                init_params_wl['A'] = 0.001; init_params_wl['tau'] = 0.5
-            if 'gp' in detrending_type:
-                init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
-                init_params_wl['GP_log_rho'] = jnp.log(1)
-            if 'linear_discontinuity' in detrending_type:
-                init_params_wl['t_jump'] = 59791.12
-                init_params_wl['jump'] = -0.001 
-
-            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
-            
-            if 'gp' in detrending_type:
-                print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
-                whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets, ld_profile=ld_profile)
-                init_params_prefit = init_params_wl.copy()
-                init_params_prefit.pop('GP_log_sigma', None)
-                init_params_prefit.pop('GP_log_rho', None)
-                soln_prefit = optimx.optimize(whitelight_model_prefit, start=init_params_prefit)(
-                    key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
-                )
-                print("--- Initializing GP with Pre-Fit Parameters ---")
-                for k in soln_prefit.keys():
-                    if k in init_params_wl: init_params_wl[k] = soln_prefit[k]
-                
-                print("Please make sure config is CPU for GP whitelight fit!")
-                init_params_wl['GP_log_sigma'] = jnp.log(5.0 * jnp.nanmedian(data.wl_flux_err))
-                init_params_wl['GP_log_rho'] = jnp.log(0.1)
-                whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
-                soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(
-                    key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
-                )
-            else:
-                soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
-            mcmc = numpyro.infer.MCMC(
-                numpyro.infer.NUTS(whitelight_model_for_run, regularize_mass_matrix=False, init_strategy=numpyro.infer.init_to_value(values=soln), target_accept_prob=0.9),
-                num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True, chain_method='vectorized'
-            )
-            mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
-            inf_data = az.from_numpyro(mcmc)
-            if save_trace: az.to_netcdf(inf_data, f'whitelight_trace_{n_planets}planets.nc')
-            wl_samples = mcmc.get_samples()
-            print(az.summary(inf_data, var_names=None, round_to=7))
-
-            # ------------------------------------------------
-            # PARAMETER EXTRACTION
-            # ------------------------------------------------
-            bestfit_params_wl = {
-                'period': PERIOD_FIXED,
-            }
-            if 'c1' in wl_samples and ld_profile == 'power2':
-                bestfit_params_wl['c1'] = jnp.nanmedian(wl_samples['c1'], axis=0)
-                bestfit_params_wl['c2'] = jnp.nanmedian(wl_samples['c2'], axis=0)
-                
-                POLY_DEGREE = 12
-                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-                power2_profile = get_I_power2(bestfit_params_wl['c1'], bestfit_params_wl['c2'], MUS)
-                u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-                bestfit_params_wl['u'] = u_poly
-            else:
-                bestfit_params_wl['u'] = jnp.nanmedian(wl_samples['u'], axis=0)
-
-            durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
-            durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
-
-            for i in range(n_planets):
-                durations_fit.append(jnp.nanmedian(wl_samples[f'duration_{i}']))
-                t0s_fit.append(jnp.nanmedian(wl_samples[f't0_{i}']))
-                bs_fit.append(jnp.nanmedian(wl_samples[f'b_{i}']))
-                rors_fit.append(jnp.nanmedian(wl_samples[f'rors_{i}']))
-                durations_err.append(jnp.std(wl_samples[f'duration_{i}']))
-                t0s_err.append(jnp.std(wl_samples[f't0_{i}']))
-                bs_err.append(jnp.std(wl_samples[f'b_{i}']))
-                rors_err.append(jnp.std(wl_samples[f'rors_{i}']))
-                depths_err.append(jnp.std(wl_samples[f'rors_{i}']**2))
-
-            bestfit_params_wl['duration'] = jnp.array(durations_fit)
-            bestfit_params_wl['t0'] = jnp.array(t0s_fit)
-            bestfit_params_wl['b'] = jnp.array(bs_fit)
-            bestfit_params_wl['rors'] = jnp.array(rors_fit)
-            bestfit_params_wl['depths'] = jnp.array(rors_fit)**2
-
-            bestfit_params_wl['duration_err'] = jnp.array(durations_err)
-            bestfit_params_wl['t0_err'] = jnp.array(t0s_err)
-            bestfit_params_wl['b_err'] = jnp.array(bs_err)
-            bestfit_params_wl['rors_err'] = jnp.array(rors_err)
-            bestfit_params_wl['depths_err'] = jnp.array(depths_err)
-            bestfit_params_wl['error'] = jnp.nanmedian(wl_samples['error'])
-            
-            if detrending_type != 'none':
-                bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
-                if detrending_type != 'gp': 
-                    bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
-                if 'v' in wl_samples and 'v' not in bestfit_params_wl:
-                     bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
-
-            if 'v2' in wl_samples:
-                bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
-            if 'v3' in wl_samples:
-                bestfit_params_wl['v3'] = jnp.nanmedian(wl_samples['v3'])
-            if 'v4' in wl_samples:
-                bestfit_params_wl['v4'] = jnp.nanmedian(wl_samples['v4'])
-            if 'explinear' in detrending_type:
-                bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
-                bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
-            if 'spot' in detrending_type:
-                bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
-                bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
-                bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
-            if 'linear_discontinuity' in detrending_type:
-                bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
-                bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
-    
-            if 'gp' in detrending_type:
-                bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
-                bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
-
-            spot_trend, jump_trend = None, None
-            if 'spot' in detrending_type:
-                spot_trend = spot_crossing(data.wl_time, bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"])
-            if 'linear_discontinuity' in detrending_type:
-                jump_trend = jnp.where(data.wl_time > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
-
-            # ------------------------------------------------
-            # RECONSTRUCT MODEL
-            # ------------------------------------------------
-            if 'gp' in detrending_type:
-                # Select the correct mean function
-                if 'linear' in detrending_type and 'explinear' not in detrending_type:
-                    gp_mean_func = compute_lc_linear_gp_mean
-                elif 'quadratic' in detrending_type:
-                    gp_mean_func = compute_lc_quadratic_gp_mean
-                elif 'explinear' in detrending_type:
-                    gp_mean_func = compute_lc_explinear_gp_mean
-                else:
-                    gp_mean_func = compute_lc_gp_mean
-
-                wl_kernel = tinygp.kernels.quasisep.Matern32(
-                    scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
-                    sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
-                )
-                wl_gp = tinygp.GaussianProcess(
-                    wl_kernel,
-                    data.wl_time,
-                    diag=bestfit_params_wl['error']**2,
-                    mean=partial(gp_mean_func, bestfit_params_wl),
-                )
-                cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
-                mu, var = cond_gp.loc, cond_gp.variance
-                wl_transit_model = mu
-                
-                planet_model_only = compute_transit_model(bestfit_params_wl, data.wl_time)
-                # The total trend (parametric + stochastic) is Total - Planet - 1
-                trend_flux_total = mu - planet_model_only - 1.0
-                
-                # The "GP Trend" (stochastic part only) is Posterior Mean - Parametric Mean
-                parametric_mean_val = gp_mean_func(bestfit_params_wl, data.wl_time)
-                gp_stochastic_component = mu - parametric_mean_val
-
-            elif detrending_type == 'linear':
-                wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'quadratic':
-                wl_transit_model = compute_lc_quadratic(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'cubic':
-                wl_transit_model = compute_lc_cubic(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'quartic':
-                wl_transit_model = compute_lc_quartic(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'explinear':
-                wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'none':
-                wl_transit_model = compute_lc_none(bestfit_params_wl, data.wl_time)
-            elif detrending_type == 'linear_discontinuity':
-                wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
-            else:
-                 print('Error with model, not defined!')
-                 exit()
-
-            wl_residual = data.wl_flux - wl_transit_model
-            wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
-            wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
-            wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
-
-            plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
-            plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
-
-            plt.savefig(f"{output_dir}/11_{instrument_full_str}_whitelightmodel.png")
-            plt.close()
-
-            plt.scatter(data.wl_time, wl_residual, s=6, c='k')
-            plt.title('WL Pre-outlier rejection residual')
-            plt.savefig(f"{output_dir}/12_{instrument_full_str}_whitelightresidual.png")
-            plt.close()
-
-            # ------------------------------------------------
-            # DETRENDED FLUX CALCULATION
-            # ------------------------------------------------
-            t_masked = data.wl_time[~wl_mad_mask]
-            f_masked = data.wl_flux[~wl_mad_mask]
-            t_norm_masked = t_masked - jnp.min(t_masked)
-
-            if 'gp' in detrending_type:
-                planet_model_masked = compute_transit_model(bestfit_params_wl, t_masked)
-                mu_masked = mu[~wl_mad_mask] 
-                total_trend_at_points = mu_masked - planet_model_masked
-                detrended_flux = f_masked - (total_trend_at_points - 1.0)
-                gp_stochastic_at_masked = gp_stochastic_component[~wl_mad_mask]
-
-            elif detrending_type == 'linear':
-                trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'quadratic':
-                trend = (bestfit_params_wl["c"] + 
-                         bestfit_params_wl["v"] * t_norm_masked + 
-                         bestfit_params_wl["v2"] * t_norm_masked**2)
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'cubic':
-                trend = (bestfit_params_wl["c"] + 
-                         bestfit_params_wl["v"] * t_norm_masked + 
-                         bestfit_params_wl["v2"] * t_norm_masked**2 + 
-                         bestfit_params_wl["v3"] * t_norm_masked**3)
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'quartic':
-                trend = (bestfit_params_wl["c"] + 
-                         bestfit_params_wl["v"] * t_norm_masked + 
-                         bestfit_params_wl["v2"] * t_norm_masked**2 + 
-                         bestfit_params_wl["v3"] * t_norm_masked**3 + 
-                         bestfit_params_wl["v4"] * t_norm_masked**4)
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'explinear':
-                trend = (bestfit_params_wl["c"] + 
-                         bestfit_params_wl["v"] * t_norm_masked + 
-                         bestfit_params_wl['A'] * jnp.exp(-t_norm_masked / bestfit_params_wl['tau']))
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'linear_discontinuity':
-                jump = jnp.where(t_masked > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
-                trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked + jump
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'spot':
-                spot = spot_crossing(t_masked, bestfit_params_wl["spot_amp"], 
-                                     bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"])
-                trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked + spot
-                detrended_flux = f_masked - trend + 1.0
-
-            elif detrending_type == 'none':
-                detrended_flux = f_masked 
-                
-            else:
-                trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked
-                detrended_flux = f_masked - trend + 1.0 
-
-            plt.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5)
-            plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
-            plt.savefig(f'{output_dir}/14_{instrument_full_str}_whitelightdetrended.png')
-            plt.close()
-
-            transit_only_model = compute_transit_model(bestfit_params_wl, t_masked) + 1.0
-            residuals_detrended = detrended_flux - transit_only_model 
-
-            fig = plt.figure(figsize=(16, 14))
-            b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
-                                                jnp.array(data.wl_flux), 
-                                                bestfit_params_wl['duration'])
-            
-            b_time_det, b_flux_det = jax_bin_lightcurve(jnp.array(t_masked), 
-                                                        jnp.array(detrended_flux), 
-                                                        bestfit_params_wl['duration'])
-            b_time_det, b_res_det = jax_bin_lightcurve(jnp.array(t_masked), 
-                                            jnp.array(residuals_detrended), 
-                                            bestfit_params_wl['duration'])
-            bin_style = dict(c='darkviolet', edgecolors='darkslateblue', s=40,  zorder=10, label='Binned (8/dur)')
-
-            gs = gridspec.GridSpec(3, 2, figure=fig, height_ratios=[1, 1, 1.5], 
-                                   width_ratios=[1, 1], hspace=0.3, wspace=0.3)
-
-            ax1 = fig.add_subplot(gs[0, 0])
-            ax1.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
-            ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
-            ax1.set_title('Raw Light Curve', fontsize=14)
-            ax1.set_ylabel('Flux', fontsize=12)
-            ax1.tick_params(labelbottom=False)
-
-            ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
-            ax2.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
-            ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
-            ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
-            ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
-            ax2.set_ylabel('Flux', fontsize=12)
-            ax2.tick_params(labelbottom=False)
-
-            gs_nested = gridspec.GridSpecFromSubplotSpec(
-                2, 1, subplot_spec=gs[2, 0], 
-                height_ratios=[2, 1],
-                hspace=0.0
-            )
-
-            ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
-
-            ax3_top.scatter(t_masked, detrended_flux, c='k', s=4, alpha=0.2, label='Detrended Data')
-            ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
-            ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
-            ax3_top.set_ylabel('Normalized Flux', fontsize=12)
-            ax3_top.set_title('Detrended Light Curve', fontsize=14)
-            plt.setp(ax3_top.get_xticklabels(), visible=False)
-
-            ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
-    
-
-            ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=4, alpha=0.2)
-            ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
-            ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det) * 1e6 , **bin_style)
-            ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
-            ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
-
-            dt = np.median(np.diff(data.wl_time)) * 86400 
-            residuals_arr = np.array(wl_residual[~wl_mad_mask])
-
-            beta, bin_sizes_min, measured_rms, expected_rms = calculate_beta_metrics(residuals_arr, dt)
-            mc_betas, rms_lo_1, rms_hi_1, rms_lo_2, rms_hi_2 = run_beta_monte_carlo(residuals_arr, dt, n_sims=500)
-
-            mu_sim, std_sim = norm.fit(mc_betas)
-            z_score = (beta - mu_sim) / std_sim
-
-            print(f"Beta: {beta:.4f}")
-            print(f"Measured Beta: {beta:.3f}")
-            print(f"MC Mean Beta:  {mu_sim:.3f}")
-            print(f"MC Std Dev:    {std_sim:.3f}")
-            print(f"Significance:  {z_score:.2f} sigma")
-
-            ax_rms = fig.add_subplot(gs[0:2, 1])
-            ax_rms.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
-            ax_rms.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
-            ax_rms.fill_between(bin_sizes_min, rms_lo_1 * 1e6, rms_hi_1 * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
-            ax_rms.loglog(bin_sizes_min, measured_rms * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={beta:.2f})')
-            ax_rms.set_xlabel('Bin Size (minutes)', fontsize=12)
-            ax_rms.set_ylabel('RMS (ppm)', fontsize=12)
-            ax_rms.set_title('Time-Correlated Noise', fontsize=14)
-            ax_rms.grid(True, which="both", alpha=0.2)
-
-            ax_beta = fig.add_subplot(gs[2, 1])
-
-            n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
-
-            xmin, xmax = ax_beta.get_xlim()
-            x_plot = np.linspace(xmin, xmax, 100)
-            p_plot = norm.pdf(x_plot, mu_sim, std_sim)
-            ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
-
-            ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
-
-            sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
-            ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
-                       transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
-
-            ax_beta.set_xlabel('Beta Factor', fontsize=12)
-            ax_beta.set_ylabel('Probability Density', fontsize=12)
-            ax_beta.set_title("Beta Significance Test", fontsize=14)
-
-            plt.tight_layout()
-            plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
-            plt.close(fig)
-
-            np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
-            
-            if 'gp' in detrending_type:
-                df = pd.DataFrame({
-                    'wl_flux': data.wl_flux, 
-                    'gp_flux': mu,
-                    'gp_err': jnp.sqrt(var), 
-                    'gp_trend': gp_stochastic_component
-                }) 
-                df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-            
-            rows = []
-            for i in range(n_planets):
-                row = {
-                    'planet_id': i,
-                    'period': bestfit_params_wl['period'][i],
-                    'duration': bestfit_params_wl['duration'][i],
-                    't0': bestfit_params_wl['t0'][i],
-                    'b': bestfit_params_wl['b'][i],
-                    'rors': bestfit_params_wl['rors'][i],
-                    'depths': bestfit_params_wl['depths'][i],
-                }
-                if detrending_type != 'none':
-                    row['c'] = bestfit_params_wl['c']
-                    if 'v' in bestfit_params_wl: row['v'] = bestfit_params_wl['v']
-                
-                if 'c1' in bestfit_params_wl:
-                    row['u1'] = bestfit_params_wl['c1']
-                    row['u2'] = bestfit_params_wl['c2']
-                    row['c1'] = bestfit_params_wl['c1']
-                    row['c2'] = bestfit_params_wl['c2']
-                else:
-                    row['u1'] = bestfit_params_wl['u'][0]
-                    row['u2'] = bestfit_params_wl['u'][1]
-                
-                if 'explinear' in detrending_type:
-                    row['A'] = bestfit_params_wl['A']
-                    row['tau'] = bestfit_params_wl['tau']
-                elif 'quadratic' in detrending_type:
-                    row['v2'] = bestfit_params_wl['v2']
-                if 'gp' in detrending_type:
-                    row['GP_log_sigma'] = bestfit_params_wl['GP_log_sigma']
-                    row['GP_log_rho'] = bestfit_params_wl['GP_log_rho']
-                
-                rows.append(row)
+    for detrending_type in detrend_types_to_run:
+        print(f"\n{'='*40}")
+        print(f"Running White Light Fit for: {detrending_type}")
+        print(f"{'='*40}\n")
         
-            df = pd.DataFrame(rows)
-            df.to_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv', index=False)
-            bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
+        # Unique suffix for this run to avoid overwriting plots/files
+        run_suffix = f"{instrument_full_str}_{detrending_type}"
+        
+        # We perform the fit regardless of whether files exist to ensure we capture the metrics for comparison
+        print('Fitting whitelight for outliers and bestfit parameters')
+        hyper_params_wl = {
+            "duration": PRIOR_DUR,
+            "t0": PRIOR_T0,
+            'period': PERIOD_FIXED,
+        }
+        if 'spot' in detrending_type:
+            hyper_params_wl['spot_guess'] = spot_mu
 
-            DURATION_BASE = bestfit_params_wl_df['duration'].values
-            T0_BASE = bestfit_params_wl_df['t0'].values
-            B_BASE = bestfit_params_wl_df['b'].values
-            RORS_BASE = bestfit_params_wl_df['rors'].values
-            DEPTH_BASE = RORS_BASE**2
+        hyper_params_wl['u'] = U_mu_wl
+
+        init_params_wl = {
+            'c': 1.0,
+            'v': 0.0,
+            'log_jitter': jnp.log(1e-4),
+            'b': PRIOR_B,
+            'rors': PRIOR_RPRS
+        }
+        init_params_wl['u'] = U_mu_wl
+
+        for i in range(n_planets):
+            init_params_wl[f'logD_{i}'] = jnp.log(PRIOR_DUR[i])
+            init_params_wl[f't0_{i}'] = PRIOR_T0[i]
+            init_params_wl[f'_b_{i}'] = PRIOR_B[i]
+            init_params_wl[f'depths_{i}'] = PRIOR_DEPTH[i]
+
+        if 'quadratic' in detrending_type:
+            init_params_wl['v2'] = 0.0
+        if 'cubic' in detrending_type:
+            init_params_wl['v2'] = 0.0; init_params_wl['v3'] = 0.0
+        if 'quartic' in detrending_type:
+            init_params_wl['v2'] = 0.0; init_params_wl['v3'] = 0.0; init_params_wl['v4'] = 0.0
+        if 'explinear' in detrending_type:
+            init_params_wl['A'] = 0.001; init_params_wl['tau'] = 0.5
+        if 'gp' in detrending_type:
+            init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
+            init_params_wl['GP_log_rho'] = jnp.log(1)
+        if 'linear_discontinuity' in detrending_type:
+            init_params_wl['t_jump'] = 59791.12
+            init_params_wl['jump'] = -0.001 
+
+        whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
+        
+        if 'gp' in detrending_type:
+            print("--- Running Pre-Fit with Linear Detrending to stabilize GP ---")
+            whitelight_model_prefit = create_whitelight_model(detrend_type='linear', n_planets=n_planets, ld_profile=ld_profile)
+            init_params_prefit = init_params_wl.copy()
+            init_params_prefit.pop('GP_log_sigma', None)
+            init_params_prefit.pop('GP_log_rho', None)
+            soln_prefit = optimx.optimize(whitelight_model_prefit, start=init_params_prefit)(
+                key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
+            )
+            print("--- Initializing GP with Pre-Fit Parameters ---")
+            for k in soln_prefit.keys():
+                if k in init_params_wl: init_params_wl[k] = soln_prefit[k]
+            
+            print("Please make sure config is CPU for GP whitelight fit!")
+            init_params_wl['GP_log_sigma'] = jnp.log(5.0 * jnp.nanmedian(data.wl_flux_err))
+            init_params_wl['GP_log_rho'] = jnp.log(0.1)
+            whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
+            soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(
+                key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
+            )
         else:
-            print(f'GP trends already exist...')
-            wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
-            bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-            DURATION_BASE = bestfit_params_wl_df['duration'].values
-            T0_BASE = bestfit_params_wl_df['t0'].values
-            B_BASE = bestfit_params_wl_df['b'].values
-            RORS_BASE = bestfit_params_wl_df['rors'].values
-            DEPTH_BASE = RORS_BASE**2
-    else:
-        print(f'Whitelight outliers and bestfit parameters already exist...')
-        wl_mad_mask = np.load(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
-        bestfit_params_wl_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_bestfit_params.csv')
-        DURATION_BASE = bestfit_params_wl_df['duration'].values
-        T0_BASE = bestfit_params_wl_df['t0'].values
-        B_BASE = bestfit_params_wl_df['b'].values
-        RORS_BASE = bestfit_params_wl_df['rors'].values
-        DEPTH_BASE = RORS_BASE**2
+            soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+        mcmc = numpyro.infer.MCMC(
+            numpyro.infer.NUTS(whitelight_model_for_run, regularize_mass_matrix=False, init_strategy=numpyro.infer.init_to_value(values=soln), target_accept_prob=0.9),
+            num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True, chain_method='vectorized'
+        )
+        mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+        inf_data = az.from_numpyro(mcmc)
+        if save_trace: az.to_netcdf(inf_data, f'whitelight_trace_{n_planets}planets_{detrending_type}.nc')
+        wl_samples = mcmc.get_samples()
+        print(az.summary(inf_data, var_names=None, round_to=7))
 
-  
+        # ------------------------------------------------
+        # PARAMETER EXTRACTION
+        # ------------------------------------------------
+        bestfit_params_wl = {
+            'period': PERIOD_FIXED,
+        }
+        if 'c1' in wl_samples and ld_profile == 'power2':
+            bestfit_params_wl['c1'] = jnp.nanmedian(wl_samples['c1'], axis=0)
+            bestfit_params_wl['c2'] = jnp.nanmedian(wl_samples['c2'], axis=0)
+            
+            POLY_DEGREE = 12
+            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+            power2_profile = get_I_power2(bestfit_params_wl['c1'], bestfit_params_wl['c2'], MUS)
+            u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+            bestfit_params_wl['u'] = u_poly
+        else:
+            bestfit_params_wl['u'] = jnp.nanmedian(wl_samples['u'], axis=0)
+
+        durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
+        durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
+
+        for i in range(n_planets):
+            durations_fit.append(jnp.nanmedian(wl_samples[f'duration_{i}']))
+            t0s_fit.append(jnp.nanmedian(wl_samples[f't0_{i}']))
+            bs_fit.append(jnp.nanmedian(wl_samples[f'b_{i}']))
+            rors_fit.append(jnp.nanmedian(wl_samples[f'rors_{i}']))
+            durations_err.append(jnp.std(wl_samples[f'duration_{i}']))
+            t0s_err.append(jnp.std(wl_samples[f't0_{i}']))
+            bs_err.append(jnp.std(wl_samples[f'b_{i}']))
+            rors_err.append(jnp.std(wl_samples[f'rors_{i}']))
+            depths_err.append(jnp.std(wl_samples[f'rors_{i}']**2))
+
+        bestfit_params_wl['duration'] = jnp.array(durations_fit)
+        bestfit_params_wl['t0'] = jnp.array(t0s_fit)
+        bestfit_params_wl['b'] = jnp.array(bs_fit)
+        bestfit_params_wl['rors'] = jnp.array(rors_fit)
+        bestfit_params_wl['depths'] = jnp.array(rors_fit)**2
+
+        bestfit_params_wl['duration_err'] = jnp.array(durations_err)
+        bestfit_params_wl['t0_err'] = jnp.array(t0s_err)
+        bestfit_params_wl['b_err'] = jnp.array(bs_err)
+        bestfit_params_wl['rors_err'] = jnp.array(rors_err)
+        bestfit_params_wl['depths_err'] = jnp.array(depths_err)
+        bestfit_params_wl['error'] = jnp.nanmedian(wl_samples['error'])
+        
+        if detrending_type != 'none':
+            bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
+            if detrending_type != 'gp': 
+                bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
+            if 'v' in wl_samples and 'v' not in bestfit_params_wl:
+                    bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
+
+        if 'v2' in wl_samples:
+            bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
+        if 'v3' in wl_samples:
+            bestfit_params_wl['v3'] = jnp.nanmedian(wl_samples['v3'])
+        if 'v4' in wl_samples:
+            bestfit_params_wl['v4'] = jnp.nanmedian(wl_samples['v4'])
+        if 'explinear' in detrending_type:
+            bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
+            bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+        if 'spot' in detrending_type:
+            bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
+            bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
+            bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
+        if 'linear_discontinuity' in detrending_type:
+            bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
+            bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
+
+        if 'gp' in detrending_type:
+            bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
+            bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
+
+        spot_trend, jump_trend = None, None
+        if 'spot' in detrending_type:
+            spot_trend = spot_crossing(data.wl_time, bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"])
+        if 'linear_discontinuity' in detrending_type:
+            jump_trend = jnp.where(data.wl_time > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
+
+        # ------------------------------------------------
+        # RECONSTRUCT MODEL
+        # ------------------------------------------------
+        if 'gp' in detrending_type:
+            # Select the correct mean function
+            if 'linear' in detrending_type and 'explinear' not in detrending_type:
+                gp_mean_func = compute_lc_linear_gp_mean
+            elif 'quadratic' in detrending_type:
+                gp_mean_func = compute_lc_quadratic_gp_mean
+            elif 'explinear' in detrending_type:
+                gp_mean_func = compute_lc_explinear_gp_mean
+            else:
+                gp_mean_func = compute_lc_gp_mean
+
+            wl_kernel = tinygp.kernels.quasisep.Matern32(
+                scale=jnp.exp(bestfit_params_wl['GP_log_rho']),
+                sigma=jnp.exp(bestfit_params_wl['GP_log_sigma']),
+            )
+            wl_gp = tinygp.GaussianProcess(
+                wl_kernel,
+                data.wl_time,
+                diag=bestfit_params_wl['error']**2,
+                mean=partial(gp_mean_func, bestfit_params_wl),
+            )
+            cond_gp = wl_gp.condition(data.wl_flux, data.wl_time).gp
+            mu, var = cond_gp.loc, cond_gp.variance
+            wl_transit_model = mu
+            
+            planet_model_only = compute_transit_model(bestfit_params_wl, data.wl_time)
+            # The total trend (parametric + stochastic) is Total - Planet - 1
+            trend_flux_total = mu - planet_model_only - 1.0
+            
+            # The "GP Trend" (stochastic part only) is Posterior Mean - Parametric Mean
+            parametric_mean_val = gp_mean_func(bestfit_params_wl, data.wl_time)
+            gp_stochastic_component = mu - parametric_mean_val
+
+        elif detrending_type == 'linear':
+            wl_transit_model = compute_lc_linear(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'quadratic':
+            wl_transit_model = compute_lc_quadratic(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'cubic':
+            wl_transit_model = compute_lc_cubic(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'quartic':
+            wl_transit_model = compute_lc_quartic(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'explinear':
+            wl_transit_model = compute_lc_explinear(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'none':
+            wl_transit_model = compute_lc_none(bestfit_params_wl, data.wl_time)
+        elif detrending_type == 'linear_discontinuity':
+            wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
+        else:
+                print('Error with model, not defined!')
+                exit()
+
+        wl_residual = data.wl_flux - wl_transit_model
+        wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
+        wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
+        wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
+
+        plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
+        plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
+
+        plt.savefig(f"{output_dir}/11_{run_suffix}_whitelightmodel.png")
+        plt.close()
+
+        plt.scatter(data.wl_time, wl_residual, s=6, c='k')
+        plt.title('WL Pre-outlier rejection residual')
+        plt.savefig(f"{output_dir}/12_{run_suffix}_whitelightresidual.png")
+        plt.close()
+
+        # ------------------------------------------------
+        # DETRENDED FLUX CALCULATION
+        # ------------------------------------------------
+        t_masked = data.wl_time[~wl_mad_mask]
+        f_masked = data.wl_flux[~wl_mad_mask]
+        t_norm_masked = t_masked - jnp.min(t_masked)
+
+        if 'gp' in detrending_type:
+            planet_model_masked = compute_transit_model(bestfit_params_wl, t_masked)
+            mu_masked = mu[~wl_mad_mask] 
+            total_trend_at_points = mu_masked - planet_model_masked
+            detrended_flux = f_masked - (total_trend_at_points - 1.0)
+            gp_stochastic_at_masked = gp_stochastic_component[~wl_mad_mask]
+
+        elif detrending_type == 'linear':
+            trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'quadratic':
+            trend = (bestfit_params_wl["c"] + 
+                        bestfit_params_wl["v"] * t_norm_masked + 
+                        bestfit_params_wl["v2"] * t_norm_masked**2)
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'cubic':
+            trend = (bestfit_params_wl["c"] + 
+                        bestfit_params_wl["v"] * t_norm_masked + 
+                        bestfit_params_wl["v2"] * t_norm_masked**2 + 
+                        bestfit_params_wl["v3"] * t_norm_masked**3)
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'quartic':
+            trend = (bestfit_params_wl["c"] + 
+                        bestfit_params_wl["v"] * t_norm_masked + 
+                        bestfit_params_wl["v2"] * t_norm_masked**2 + 
+                        bestfit_params_wl["v3"] * t_norm_masked**3 + 
+                        bestfit_params_wl["v4"] * t_norm_masked**4)
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'explinear':
+            trend = (bestfit_params_wl["c"] + 
+                        bestfit_params_wl["v"] * t_norm_masked + 
+                        bestfit_params_wl['A'] * jnp.exp(-t_norm_masked / bestfit_params_wl['tau']))
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'linear_discontinuity':
+            jump = jnp.where(t_masked > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
+            trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked + jump
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'spot':
+            spot = spot_crossing(t_masked, bestfit_params_wl["spot_amp"], 
+                                    bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"])
+            trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked + spot
+            detrended_flux = f_masked - trend + 1.0
+
+        elif detrending_type == 'none':
+            detrended_flux = f_masked 
+            
+        else:
+            trend = bestfit_params_wl["c"] + bestfit_params_wl["v"] * t_norm_masked
+            detrended_flux = f_masked - trend + 1.0 
+
+        plt.scatter(t_masked, detrended_flux, c='k', s=6, alpha=0.5)
+        plt.title(f'Detrended WLC: Sigma {round(wl_sigma_post_clip*1e6)} PPM')
+        plt.savefig(f'{output_dir}/14_{run_suffix}_whitelightdetrended.png')
+        plt.close()
+
+        transit_only_model = compute_transit_model(bestfit_params_wl, t_masked) + 1.0
+        residuals_detrended = detrended_flux - transit_only_model 
+
+        fig = plt.figure(figsize=(16, 14))
+        b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
+                                            jnp.array(data.wl_flux), 
+                                            bestfit_params_wl['duration'])
+        
+        b_time_det, b_flux_det = jax_bin_lightcurve(jnp.array(t_masked), 
+                                                    jnp.array(detrended_flux), 
+                                                    bestfit_params_wl['duration'])
+        b_time_det, b_res_det = jax_bin_lightcurve(jnp.array(t_masked), 
+                                        jnp.array(residuals_detrended), 
+                                        bestfit_params_wl['duration'])
+        bin_style = dict(c='darkviolet', edgecolors='darkslateblue', s=40,  zorder=10, label='Binned (8/dur)')
+
+        gs = gridspec.GridSpec(3, 2, figure=fig, height_ratios=[1, 1, 1.5], 
+                                width_ratios=[1, 1], hspace=0.3, wspace=0.3)
+
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
+        ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
+        ax1.set_title('Raw Light Curve', fontsize=14)
+        ax1.set_ylabel('Flux', fontsize=12)
+        ax1.tick_params(labelbottom=False)
+
+        ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
+        ax2.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
+        ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
+        ax2.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
+        ax2.set_title('Raw Light Curve + Best-fit Model', fontsize=14)
+        ax2.set_ylabel('Flux', fontsize=12)
+        ax2.tick_params(labelbottom=False)
+
+        gs_nested = gridspec.GridSpecFromSubplotSpec(
+            2, 1, subplot_spec=gs[2, 0], 
+            height_ratios=[2, 1],
+            hspace=0.0
+        )
+
+        ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
+
+        ax3_top.scatter(t_masked, detrended_flux, c='k', s=4, alpha=0.2, label='Detrended Data')
+        ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
+        ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
+        ax3_top.set_ylabel('Normalized Flux', fontsize=12)
+        ax3_top.set_title('Detrended Light Curve', fontsize=14)
+        plt.setp(ax3_top.get_xticklabels(), visible=False)
+
+        ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
+
+
+        ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=4, alpha=0.2)
+        ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
+        ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det) * 1e6 , **bin_style)
+        ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
+        ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
+
+        dt = np.median(np.diff(data.wl_time)) * 86400 
+        residuals_arr = np.array(wl_residual[~wl_mad_mask])
+
+        beta, bin_sizes_min, measured_rms, expected_rms = calculate_beta_metrics(residuals_arr, dt)
+        mc_betas, rms_lo_1, rms_hi_1, rms_lo_2, rms_hi_2 = run_beta_monte_carlo(residuals_arr, dt, n_sims=500)
+
+        mu_sim, std_sim = norm.fit(mc_betas)
+        z_score = (beta - mu_sim) / std_sim
+
+        print(f"Beta: {beta:.4f}")
+        print(f"Measured Beta: {beta:.3f}")
+        print(f"MC Mean Beta:  {mu_sim:.3f}")
+        print(f"MC Std Dev:    {std_sim:.3f}")
+        print(f"Significance:  {z_score:.2f} sigma")
+        
+        # Store results for comparison
+        comparison_results[detrending_type] = {
+            'beta': beta,
+            'bin_sizes_min': bin_sizes_min,
+            'measured_rms': measured_rms,
+            'expected_rms': expected_rms,
+            'mc_betas': mc_betas,
+            'mu_sim': mu_sim,
+            'std_sim': std_sim,
+            'z_score': z_score,
+            'rms_lo_1': rms_lo_1, 'rms_hi_1': rms_hi_1,
+            'rms_lo_2': rms_lo_2, 'rms_hi_2': rms_hi_2
+        }
+
+        ax_rms = fig.add_subplot(gs[0:2, 1])
+        ax_rms.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
+        ax_rms.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
+        ax_rms.fill_between(bin_sizes_min, rms_lo_1 * 1e6, rms_hi_1 * 1e6, color='gray', alpha=0.4, label='White Noise ($1\sigma$)')
+        ax_rms.loglog(bin_sizes_min, measured_rms * 1e6, color='teal', lw=2, marker='o', markersize=5, label=f'Data (Beta={beta:.2f})')
+        ax_rms.set_xlabel('Bin Size (minutes)', fontsize=12)
+        ax_rms.set_ylabel('RMS (ppm)', fontsize=12)
+        ax_rms.set_title('Time-Correlated Noise', fontsize=14)
+        ax_rms.grid(True, which="both", alpha=0.2)
+
+        ax_beta = fig.add_subplot(gs[2, 1])
+
+        n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
+
+        xmin, xmax = ax_beta.get_xlim()
+        x_plot = np.linspace(xmin, xmax, 100)
+        p_plot = norm.pdf(x_plot, mu_sim, std_sim)
+        ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
+
+        ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
+
+        sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
+        ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
+                    transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
+
+        ax_beta.set_xlabel('Beta Factor', fontsize=12)
+        ax_beta.set_ylabel('Probability Density', fontsize=12)
+        ax_beta.set_title("Beta Significance Test", fontsize=14)
+
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/15_{run_suffix}_whitelight_summary.png')
+        plt.close(fig)
+
+        np.save(f'{output_dir}/{run_suffix}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
+        
+        if 'gp' in detrending_type:
+            df = pd.DataFrame({
+                'wl_flux': data.wl_flux, 
+                'gp_flux': mu,
+                'gp_err': jnp.sqrt(var), 
+                'gp_trend': gp_stochastic_component
+            }) 
+            df.to_csv(f'{output_dir}/{run_suffix}_whitelight_GP_database.csv')
+        
+        rows = []
+        for i in range(n_planets):
+            row = {
+                'planet_id': i,
+                'period': bestfit_params_wl['period'][i],
+                'duration': bestfit_params_wl['duration'][i],
+                't0': bestfit_params_wl['t0'][i],
+                'b': bestfit_params_wl['b'][i],
+                'rors': bestfit_params_wl['rors'][i],
+                'depths': bestfit_params_wl['depths'][i],
+            }
+            if detrending_type != 'none':
+                row['c'] = bestfit_params_wl['c']
+                if 'v' in bestfit_params_wl: row['v'] = bestfit_params_wl['v']
+            
+            if 'c1' in bestfit_params_wl:
+                row['u1'] = bestfit_params_wl['c1']
+                row['u2'] = bestfit_params_wl['c2']
+                row['c1'] = bestfit_params_wl['c1']
+                row['c2'] = bestfit_params_wl['c2']
+            else:
+                row['u1'] = bestfit_params_wl['u'][0]
+                row['u2'] = bestfit_params_wl['u'][1]
+            
+            if 'explinear' in detrending_type:
+                row['A'] = bestfit_params_wl['A']
+                row['tau'] = bestfit_params_wl['tau']
+            elif 'quadratic' in detrending_type:
+                row['v2'] = bestfit_params_wl['v2']
+            if 'gp' in detrending_type:
+                row['GP_log_sigma'] = bestfit_params_wl['GP_log_sigma']
+                row['GP_log_rho'] = bestfit_params_wl['GP_log_rho']
+            
+            rows.append(row)
+    
+        df = pd.DataFrame(rows)
+        df.to_csv(f'{output_dir}/{run_suffix}_whitelight_bestfit_params.csv', index=False)
+            
+
+    plot_comparison_16(comparison_results, output_dir, instrument_full_str)
+
 
 if __name__ == "__main__":
     main()
