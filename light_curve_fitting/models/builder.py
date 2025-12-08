@@ -61,8 +61,8 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
             u_theory = prior_params['u']
             c1_mu, c2_mu = u_theory[0], u_theory[1]
-            c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0)) #dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
-            c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0)) #dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
+            c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
+            c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
             power2_profile = get_I_power2(c1, c2, MUS)
             u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
             u = numpyro.deterministic('u', u_poly)
@@ -83,26 +83,26 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         if has_linear_term:
             params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
 
-        has_velocity = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot'})
-        if has_velocity:
-            params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1))
+        has_linear = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot'})
+        if has_linear:
+            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
 
         if not detrend_components.isdisjoint({'quadratic', 'cubic', 'quartic'}):
-            params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1))
+            params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1))
 
         if not detrend_components.isdisjoint({'cubic', 'quartic'}):
-            params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1))
+            params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1))
 
         if 'quartic' in detrend_components:
-            params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1))
+            params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1))
 
         if 'linear_discontinuity' in detrend_components:
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 1e-2))
             params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1))
 
         if 'explinear' in detrend_components:
-            params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
-            log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-5), jnp.log(1.0)))
+            params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
+            log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)))
             params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
 
         if 'spot' in detrend_components:
@@ -232,7 +232,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
                 if detrend_type == 'explinear':
                     params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                    params['tau'] = numpyro.sample('tau', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)).expand([num_lcs]))
+                    params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
                     in_axes.update({'A': 0, 'tau': 0})
                 if detrend_type == 'spot':
                     params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
