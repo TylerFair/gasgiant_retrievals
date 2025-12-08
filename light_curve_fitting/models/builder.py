@@ -78,35 +78,34 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         }
 
         # --- PARAMETER SAMPLING BASED ON COMPONENTS ---
-        # Using set intersection for cleaner checks
-        has_linear_term = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot', 'gp'})
-        if has_linear_term:
-            params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1))
+        has_offset_term = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot', 'gp'})
+        if has_offset_term:
+            params['c'] = numpyro.sample('c', dist.Uniform(0.9, 1.1))
 
         has_linear = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot'})
         if has_linear:
-            params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1))
+            params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1))
 
         if not detrend_components.isdisjoint({'quadratic', 'cubic', 'quartic'}):
-            params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1))
+            params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1))
 
         if not detrend_components.isdisjoint({'cubic', 'quartic'}):
-            params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1))
+            params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1))
 
         if 'quartic' in detrend_components:
-            params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1))
+            params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1))
 
         if 'linear_discontinuity' in detrend_components:
             params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 1e-2))
-            params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1))
+            params['jump'] = numpyro.sample('jump', dist.Uniform(-0.1, 0.1))
 
         if 'explinear' in detrend_components:
-            params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1))
+            params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
             log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)))
             params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
 
         if 'spot' in detrend_components:
-            params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(0.0, 0.01))
+            params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(-0.01, 0.01))
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
             params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01))
 
@@ -173,8 +172,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
                 c1_mu = mu_u_ld[:, 0]
                 c2_mu = mu_u_ld[:, 1]
-                c1 = numpyro.sample('c1', dist.Uniform(0.0, 1.0).expand([num_lcs])) #dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
-                c2 = numpyro.sample('c2', dist.Uniform(0.0, 1.0).expand([num_lcs])) #dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
+                c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
+                c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
 
                 def compute_one_lc_u(c1_val, c2_val):
                     power2_profile = get_I_power2(c1_val, c2_val, MUS)
@@ -208,30 +207,30 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         # --- STANDARD DETRENDING (SAMPLES v IF NOT 'none') ---
         if detrend_type != 'none':
             if trend_mode == 'free':
-                params['c'] = numpyro.sample('c', dist.Normal(1.0, 0.1).expand([num_lcs]))
-                params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                params['c'] = numpyro.sample('c', dist.Uniform(0.9, 1.1).expand([num_lcs]))
+                params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                 in_axes.update({'c': 0, 'v': 0})
 
                 if detrend_type == 'quadratic':
-                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes.update({'v2': 0})
                 elif detrend_type == 'cubic':
-                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                    params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes.update({'v2': 0, 'v3': 0})
                 elif detrend_type == 'quartic':
-                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                    params['v3'] = numpyro.sample('v3', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                    params['v4'] = numpyro.sample('v4', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
 
                 if detrend_type == 'linear_discontinuity':
                     params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1).expand([num_lcs]))
-                    params['jump'] = numpyro.sample('jump', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['jump'] = numpyro.sample('jump', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes.update({'t_jump': 0, 'jump': 0})
 
                 if detrend_type == 'explinear':
-                    params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)).expand([num_lcs]))
                     params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
                     in_axes.update({'A': 0, 'tau': 0})
@@ -283,16 +282,17 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             # --- FIX: Check if parameters already exist to avoid Duplication Error ---
             if 'linear' in detrend_type:
                 if 'v' not in params:
-                    params['v'] = numpyro.sample('v', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes['v'] = 0
             if 'quadratic' in detrend_type:
                 if 'v2' not in params:
-                    params['v2'] = numpyro.sample('v2', dist.Normal(0.0, 0.1).expand([num_lcs]))
+                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes['v2'] = 0
             if 'explinear' in detrend_type:
                 if 'A' not in params:
-                    params['A'] = numpyro.sample('A', dist.Normal(0.0, 0.1).expand([num_lcs]))
-                    params['tau'] = numpyro.sample('tau', dist.HalfNormal(0.1).expand([num_lcs]))
+                    params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)).expand([num_lcs]))
+                    params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
                     in_axes.update({'A': 0, 'tau': 0})
 
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, gp_trend)
@@ -302,7 +302,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             in_axes['A_spot'] = 0
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, spot_trend)
         elif detrend_type == 'linear_discontinuity_spectroscopic':
-            params['A_jump'] = numpyro.sample('A_jump', dist.Uniform(1e-1, 1e1).expand([num_lcs]))
+            params['A_jump'] = numpyro.sample('A_jump', dist.Uniform(0.5, 2).expand([num_lcs]))
             in_axes['A_jump'] = 0
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, jump_trend)
         else:
