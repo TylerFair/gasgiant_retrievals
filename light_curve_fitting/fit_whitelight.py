@@ -469,8 +469,7 @@ def plot_comparison_16(results, output_dir, instrument_full_str):
 
         ax_beta.set_xlabel('Beta Factor', fontsize=12)
         ax_beta.set_ylabel('Probability Density', fontsize=12)
-        ax_beta.set_title(f"Beta Significance Test ({dtype}) (Beta={res["beta"]:.2f})", fontsize=14)
-        if i == 0: ax_beta.legend()
+        ax_beta.set_title(f"Beta Significance Test ({dtype}) (Beta={res['beta']:.2f})", fontsize=14)
 
     plt.tight_layout()
     plt.savefig(f'{output_dir}/16_{instrument_full_str}_comparison.png')
