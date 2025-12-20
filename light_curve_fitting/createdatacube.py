@@ -477,47 +477,119 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wavelengths, wavelengths_err = wavelengths[~nanmask], wavelengths_err[~nanmask]
     flux_unbinned, flux_err_unbinned = flux_unbinned[:, ~nanmask], flux_err_unbinned[:, ~nanmask]
 
-    # Apply time masking criteria (useful for spot-crossings)
-    if mask_start is not None and mask_end is None:
-        raise ValueError('Time mask start supplied but missing end time! Please give mask_end')
-    if mask_end is not None and mask_start is None:
-        raise ValueError('Time mask end supplied but missing start time! Please give mask_start')
-    
+    # Apply time masking criteria (useful for spot-crossings) and optional "cut" directives.
+    #
+    # Supported inputs:
+    # - mask_start/mask_end can be scalars, strings (expressions), or same-length lists.
+    # - None values are treated as open-ended (min(time) or max(time)).
+    # - Special directive "cut_phase_to_transit": keep only t0 ± 3 hours.
+
     def evaluate_mask_value(value, time):
-        """Evaluate a mask value that could be a number or string expression."""
+        """Evaluate a mask value that could be a number, None, or a string expression."""
+        if value is None:
+            return None
         if isinstance(value, str):
+            v = value.strip()
+            # Do not eval special directives
+            if v == "cut_phase_to_transit":
+                return v
             namespace = {
-                'jnp': np, 
+                'jnp': np,
                 'np': np,
                 't': time,
                 'time': time,
                 'min': np.min,
                 'max': np.max,
             }
-            return eval(value, {"__builtins__": {}}, namespace)
-        else:
-            return value
-    
-    if mask_start is not None and mask_end is not None:
-        # Check if it's a list/array (but not a string!)
+            return eval(v, {"__builtins__": {}}, namespace)
+        return value
+
+    def _to_pairs(mask_start, mask_end):
+        """Return list of (start,end) pairs from scalar/list inputs."""
+        if mask_start is None and mask_end is None:
+            return []
+
+        # If one side is missing, treat as open-ended
+        if mask_end is None and mask_start is not None:
+            if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
+                return [(s, None) for s in mask_start]
+            return [(mask_start, None)]
+
+        if mask_start is None and mask_end is not None:
+            if hasattr(mask_end, '__len__') and not isinstance(mask_end, str):
+                return [(None, e) for e in mask_end]
+            return [(None, mask_end)]
+
+        # Both provided
         if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
-            # Multiple time ranges to mask
-            timemask = np.zeros_like(time, dtype=bool)
-            for start, end in zip(mask_start, mask_end):
-                # Evaluate each start/end value
-                start_val = evaluate_mask_value(start, time)
-                end_val = evaluate_mask_value(end, time)
-                timemask |= (time >= start_val) & (time <= end_val)
-        else:
-            # Single time range to mask (could be string or number)
-            start_val = evaluate_mask_value(mask_start, time)
-            end_val = evaluate_mask_value(mask_end, time)
-            timemask = (time >= start_val) & (time <= end_val)
-        
+            if not (hasattr(mask_end, '__len__') and not isinstance(mask_end, str)):
+                raise ValueError("mask_start is a list but mask_end is not.")
+            if len(mask_start) != len(mask_end):
+                raise ValueError("mask_start and mask_end lists must be the same length.")
+            return list(zip(mask_start, mask_end))
+
+        return [(mask_start, mask_end)]
+
+    pairs = _to_pairs(mask_start, mask_end)
+
+    # 1) Handle "cut_phase_to_transit": keep only t0 +/- 3 hours (3/24 days)
+    has_cut = any(
+        (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
+        (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
+        for s, e in pairs
+    )
+
+    if has_cut:
+        # Use prior t0(s) from config
+        prior_t0s = np.atleast_1d(cfg['planet']['t0']).astype(float)
+        window = 3.0 / 24.0  # 3 hours in days
+
+        keep = np.zeros_like(time, dtype=bool)
+        for t0 in prior_t0s:
+            keep |= (time >= (t0 - window)) & (time <= (t0 + window))
+
+        time = time[keep]
+        flux_unbinned = flux_unbinned[keep, :]
+        flux_err_unbinned = flux_err_unbinned[keep, :]
+
+        # Remove cut directives so they don't get evaluated below
+        pairs = [
+            (s, e) for (s, e) in pairs
+            if not (
+                (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
+                (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
+            )
+        ]
+
+    # 2) Apply "mask out" time ranges (remove points inside each range)
+    if len(pairs) > 0:
+        timemask = np.zeros_like(time, dtype=bool)
+        tmin = float(np.min(time))
+        tmax = float(np.max(time))
+
+        for start, end in pairs:
+            start_val = evaluate_mask_value(start, time)
+            end_val = evaluate_mask_value(end, time)
+
+            # Skip fully-empty pairs
+            if start_val is None and end_val is None:
+                continue
+
+            # Support open-ended masks
+            if start_val is None:
+                start_val = tmin
+            if end_val is None:
+                end_val = tmax
+
+            # If a directive snuck through, ignore it here
+            if start_val == "cut_phase_to_transit" or end_val == "cut_phase_to_transit":
+                continue
+
+            timemask |= (time >= float(start_val)) & (time <= float(end_val))
+
         time = time[~timemask]
         flux_unbinned = flux_unbinned[~timemask, :]
         flux_err_unbinned = flux_err_unbinned[~timemask, :]
-            
     planet_cfg = cfg['planet']
     prior_t0s = np.atleast_1d(planet_cfg['t0'])
     prior_durations = np.atleast_1d(planet_cfg['duration'])
@@ -555,7 +627,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet=planet_str,
         mini_instrument=mini_instrument
     )
-
 
 
 
