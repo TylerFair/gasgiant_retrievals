@@ -4,6 +4,7 @@ import numpyro
 import numpyro.distributions as dist
 import numpyro_ext.distributions as distx
 from jaxoplanet.experimental import calc_poly_coeffs
+import numpy as np
 
 from .core import get_I_power2
 from .trends import (
@@ -39,32 +40,42 @@ COMPUTE_KERNELS = {
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}' for {n_planets} planets")
 
+    
     # Pre-compute components set for faster lookup
     detrend_components = set(detrend_type.split('+'))
+    
+    # Below is a faster implementation of the arbitrary 
+    # polynomial limb darkening approximation for the 
+    # power2 law. The idea is to:
+    # Pre-compute the intensity grid
+    # Construct a vandermonde matrix of the poly deg
+    # precompute the least-squares operator
+
+    if ld_profile == "power2":
+        POLY_DEGREE = 12
+        MUS = jnp.linspace(0.0, 1.0, 300, endpoint=True)
+        X = jnp.vander(1.0 - MUS, N=POLY_DEGREE + 1, increasing=True)[:, 1:]  # (Nmu, deg)
+        P = jnp.asarray(np.linalg.pinv(np.asarray(X)))
 
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
         durations, t0s, bs, rorss = [], [], [], []
 
         for i in range(n_planets):
-            logD = numpyro.sample(f"logD_{i}", dist.Normal(jnp.log(prior_params['duration'][i]), 3e-2))
+            logD = numpyro.sample(f"logD_{i}", dist.Uniform(jnp.log(0.0007), jnp.log(1)))
             durations.append(numpyro.deterministic(f"duration_{i}", jnp.exp(logD)))
-            t0s.append(numpyro.sample(f"t0_{i}", dist.Normal(prior_params['t0'][i], 3e-2)))
+            t0s.append(numpyro.sample(f"t0_{i}", dist.Uniform(jnp.min(t), jnp.max(t))))
             _b = numpyro.sample(f"_b_{i}", dist.Uniform(-2.0, 2.0))
             bs.append(numpyro.deterministic(f'b_{i}', jnp.abs(_b)))
-            depths = numpyro.sample(f'depths_{i}', dist.Uniform(1e-5, 0.5))
+            depths = numpyro.sample(f'depths_{i}', dist.Uniform(1e-6, 0.5))
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
 
         if ld_profile == 'quadratic':
-            u = numpyro.sample("u", distx.QuadLDParams())
+            u = numpyro.sample("u", dist.Uniform(0.0, 1.0).expand([2]).to_event(1)) #distx.QuadLDParams())
         elif ld_profile == 'power2':
-            POLY_DEGREE = 12
-            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-            u_theory = prior_params['u']
-            c1_mu, c2_mu = u_theory[0], u_theory[1]
-            c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
-            c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
-            power2_profile = get_I_power2(c1, c2, MUS)
-            u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+            c1 = numpyro.sample('c1', dist.TruncatedNormal(prior_params['u'][0], 0.2, low=0.0, high=1.0))
+            c2 = numpyro.sample('c2', dist.TruncatedNormal(prior_params['u'][1], 0.2, low=0.001, high=1.0)) 
+            prof = get_I_power2(c1, c2, MUS)
+            u_poly = P @ (1.0 - prof)
             u = numpyro.deterministic('u', u_poly)
         else:
             raise ValueError(f"Unknown ld_profile: {ld_profile}")
@@ -111,7 +122,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
         if 'gp' in detrend_components:
             params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
-            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(1)))
+            params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(0.3)))
 
         # --- MODEL DISPATCH ---
         # Direct dispatch via dictionary to avoid massive if-else chain
@@ -144,6 +155,12 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
     compute_lc_kernel = COMPUTE_KERNELS[detrend_type]
 
+    if ld_profile == "power2":
+        POLY_DEGREE_LD = 12
+        MUS_LD = jnp.linspace(0.0, 1.0, 300, endpoint=True)
+        X_LD = jnp.vander(1.0 - MUS_LD, N=POLY_DEGREE_LD + 1, increasing=True)[:, 1:]  # (Nmu, deg)
+        P_LD = jnp.asarray(np.linalg.pinv(np.asarray(X_LD)))
+
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                                mu_depths=None, PERIOD=None, trend_fixed=None,
                                ld_interpolated=None, ld_fixed=None,
@@ -168,17 +185,20 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             if ld_profile == 'quadratic':
                 u = numpyro.sample('u', dist.TruncatedNormal(loc=mu_u_ld, scale=0.2, low=-1.0, high=1.0).to_event(1))
             elif ld_profile == 'power2':
-                POLY_DEGREE = 12
-                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-                c1_mu = mu_u_ld[:, 0]
-                c2_mu = mu_u_ld[:, 1]
-                c1 = numpyro.sample('c1', dist.TruncatedNormal(c1_mu, 0.1, low=0.0, high=1.0))
-                c2 = numpyro.sample('c2', dist.TruncatedNormal(c2_mu, 0.05, low=0.001, high=1.0))
-
+                c1 = numpyro.sample('c1', dist.TruncatedNormal(mu_u_ld[:,0], 0.2, low=0.0, high=1.0))
+                c2 = numpyro.sample('c2', dist.TruncatedNormal(mu_u_ld[:,1], 0.2, low=0.001, high=1.0))
+                '''
                 def compute_one_lc_u(c1_val, c2_val):
-                    power2_profile = get_I_power2(c1_val, c2_val, MUS)
-                    return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+                    prof = get_I_power2(c1_val, c2_val, MUS)
+                    prof = prof[sort]
+                    return P @ (1.0 - prof)
+                    #power2_profile = get_I_power2(c1_val, c2_val, MUS)
+                    #return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
                 u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
+                '''
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
+                # Batched LS projection: (deg, Nmu) @ (Nmu, n_lc) -> (deg, n_lc) -> transpose
+                u_poly_all = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
                 u = numpyro.deterministic('u', u_poly_all)
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
@@ -187,14 +207,12 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 u = numpyro.deterministic('u', ld_fixed)
             elif ld_profile == 'power2':
                 POLY_DEGREE = 12
-                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+                MUS = jnp.linspace(0.0, 1.00, 100, endpoint=True)
                 c1_mu = numpyro.deterministic('c1', ld_fixed[:, 0])
                 c2_mu = numpyro.deterministic('c2', ld_fixed[:, 1])
-                def compute_one_lc_u(c1_val, c2_val):
-                    power2_profile = get_I_power2(c1_val, c2_val, MUS)
-                    return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-                u_poly_all = jax.vmap(compute_one_lc_u)(c1_mu, c2_mu)
-                u = numpyro.deterministic('u', u_poly_all)
+                profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
+                u_poly_all = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
+                u = numpyro.deterministic("u", u_poly_all)
         else:
             raise ValueError(f"Unknown ld_mode: {ld_mode}")
 
@@ -311,4 +329,5 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model_static
+
 
