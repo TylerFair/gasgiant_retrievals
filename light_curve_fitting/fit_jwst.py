@@ -32,7 +32,7 @@ from matplotlib.widgets import Slider, Button, TextBox
 import matplotlib.gridspec as gridspec
 from jaxoplanet.experimental import calc_poly_coeffs
 import tinygp
-
+import matplotlib.cm as cm
 # Import Modularized Models
 from models.core import _to_f64, _tree_to_f64, compute_transit_model, get_I_power2
 from models.trends import (
@@ -45,6 +45,181 @@ from models.gp import (
     compute_lc_explinear_gp_mean
 )
 from models.builder import create_whitelight_model, create_vectorized_model, COMPUTE_KERNELS
+import numpy as np
+
+def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method="weighted"):
+    """
+    Bin a time-series (or stack of time-series) onto a fixed cadence.
+
+    Parameters
+    ----------
+    time : (N,) array
+        Time array (assumed to be in DAYS if it's MJD/BJD-style; we convert dt_seconds->dt_days).
+    y : (N,) or (C, N) array
+        Flux (or residuals, etc.). If 2D, bins along the last axis.
+    yerr : (N,) or (C, N) array or None
+        Uncertainties. If None, uses unweighted mean and returns None for binned errors.
+    dt_seconds : float
+        Bin width in seconds.
+    t0 : float or None
+        Bin reference start time. If None, uses min(time).
+    method : {"weighted","mean"}
+        "weighted": inverse-variance weighted mean (needs yerr)
+        "mean": simple mean; error propagated as sqrt(sum(err^2))/N if yerr provided
+
+    Returns
+    -------
+    t_b : (M,) array
+    y_b : (M,) or (C, M) array
+    yerr_b : same shape as y_b or None
+    counts : (M,) array
+    """
+    time = np.asarray(time)
+    y = np.asarray(y)
+
+    if t0 is None:
+        t0 = np.nanmin(time)
+
+    dt_days = float(dt_seconds) / 86400.0
+    if dt_days <= 0:
+        raise ValueError("dt_seconds must be > 0")
+
+    # Bin index per point
+    idx = np.floor((time - t0) / dt_days).astype(np.int64)
+
+    # Valid points mask
+    valid = np.isfinite(time)
+    if y.ndim == 1:
+        valid &= np.isfinite(y)
+    else:
+        valid &= np.all(np.isfinite(y), axis=0)
+
+    if yerr is not None:
+        yerr = np.asarray(yerr)
+
+        # If someone passed (1, N) or (N, 1) for a 1D series, squeeze it.
+        if y.ndim == 1 and yerr.ndim == 2:
+            if yerr.shape == (1, y.shape[0]):
+                yerr = yerr[0]
+            elif yerr.shape == (y.shape[0], 1):
+                yerr = yerr[:, 0]
+
+        # If yerr is a scalar, treat it as a constant uncertainty for every point.
+        if yerr.ndim == 0:
+            yerr = np.full_like(y, float(yerr))
+
+        # If y is (C, N) and yerr is (N,) or (C,), broadcast it.
+        elif y.ndim == 2 and yerr.ndim == 1:
+            if yerr.shape[0] == y.shape[1]:          # (N,) -> (C, N)
+                yerr = np.broadcast_to(yerr[None, :], y.shape)
+            elif yerr.shape[0] == y.shape[0]:        # (C,) -> (C, N)
+                yerr = np.broadcast_to(yerr[:, None], y.shape)
+
+        # Now build the validity mask safely
+        if yerr.ndim == 1:
+            valid &= np.isfinite(yerr) & (yerr > 0)
+        else:
+            valid &= np.all(np.isfinite(yerr) & (yerr > 0), axis=0)
+
+
+    time_v = time[valid]
+    idx_v = idx[valid]
+
+    # Normalize bin indices so bincount is compact
+    idx0 = idx_v.min()
+    idx_v = idx_v - idx0
+    nbins = int(idx_v.max()) + 1
+
+    counts = np.bincount(idx_v, minlength=nbins).astype(float)
+    keep = counts > 0
+
+    # Binned time: simple mean time in bin
+    t_sum = np.bincount(idx_v, weights=time_v, minlength=nbins)
+    t_b = (t_sum / counts)[keep]
+    counts_b = counts[keep]
+
+    def _bin_1d(y1, e1):
+        if method == "weighted" and e1 is not None:
+            w = 1.0 / (e1 * e1)
+            wsum = np.bincount(idx_v, weights=w, minlength=nbins)
+            ysum = np.bincount(idx_v, weights=w * y1, minlength=nbins)
+            yb = (ysum / wsum)[keep]
+            eb = np.sqrt(1.0 / wsum)[keep]
+            return yb, eb
+        else:
+            ysum = np.bincount(idx_v, weights=y1, minlength=nbins)
+            yb = (ysum / counts)[keep]
+            if e1 is None:
+                return yb, None
+            esum2 = np.bincount(idx_v, weights=e1 * e1, minlength=nbins)
+            eb = np.sqrt(esum2) / counts_b
+            return yb, eb
+
+    if y.ndim == 1:
+        y_v = y[valid]
+        e_v = None if yerr is None else (yerr[valid] if yerr.ndim == 1 else yerr[:, valid])
+        y_b, e_b = _bin_1d(y_v, e_v if (e_v is not None and np.ndim(e_v) == 1) else None)
+        return t_b, y_b, e_b, counts_b
+
+    # 2D: (C, N)
+    C = y.shape[0]
+    y_b_list = []
+    e_b_list = [] if yerr is not None else None
+
+    for c in range(C):
+        y_v = y[c, valid]
+        e_v = None if yerr is None else (yerr[c, valid] if yerr.ndim == 2 else None)
+        yb, eb = _bin_1d(y_v, e_v)
+        y_b_list.append(yb)
+        if e_b_list is not None:
+            e_b_list.append(eb)
+
+    y_b = np.stack(y_b_list, axis=0)
+    e_b = None if e_b_list is None else np.stack(e_b_list, axis=0)
+    return t_b, y_b, e_b, counts_b
+
+
+def bin_spectrodata_in_time(data, dt_seconds=120.0, method="weighted"):
+    """
+    In-place time-binning for SpectroData:
+      - wl_time, wl_flux, wl_flux_err
+      - time, flux_lr, flux_err_lr
+      - time, flux_hr, flux_err_hr
+    """
+    n0 = len(data.wl_time)
+
+    # Use wl_time as the reference; assume spectroscopy time axis matches it
+    t_b, wl_b, wlerr_b, _ = _bin_time_series_numpy(
+        data.wl_time, data.wl_flux, data.wl_flux_err,
+        dt_seconds=dt_seconds, method=method
+    )
+
+    # Bin spectroscopy using the same dt; (time arrays should be aligned with wl_time)
+    t_b2, flr_b, flrerr_b, _ = _bin_time_series_numpy(
+        data.time, data.flux_lr, data.flux_err_lr,
+        dt_seconds=dt_seconds, method=method, t0=np.nanmin(data.wl_time)
+    )
+    t_b3, fhr_b, fhrerr_b, _ = _bin_time_series_numpy(
+        data.time, data.flux_hr, data.flux_err_hr,
+        dt_seconds=dt_seconds, method=method, t0=np.nanmin(data.wl_time)
+    )
+
+    # Prefer the whitelight-binned time as canonical
+    data.wl_time = t_b
+    data.wl_flux = wl_b
+    data.wl_flux_err = wlerr_b
+
+    # If tiny numerical differences happen, just set them equal to wl time
+    # (this assumes all came from the same original cadence)
+    data.time = t_b
+    data.flux_lr = flr_b
+    data.flux_err_lr = flrerr_b
+    data.flux_hr = fhr_b
+    data.flux_err_hr = fhrerr_b
+
+    n1 = len(data.wl_time)
+    print(f"[time_binning] {n0} -> {n1} points (dt={dt_seconds:.1f}s, method={method})")
+    return data
 
 # ---------------------
 # Utilities
@@ -281,14 +456,12 @@ def save_results(wavelengths,wavelength_err,  samples, csv_filename):
         depth_median = depth_median[:, np.newaxis]
         depth_err = depth_err[:, np.newaxis]
     n_planets = depth_median.shape[1]
-    header_cols = ["wavelength"]
-    header_cols = header_cols.append("wavelength_err")
+    header_cols = ["wavelength", "wavelength_err"]
     for i in range(n_planets):
         header_cols.append(f"depth{i:02d}")
         header_cols.append(f"depth_err{i:02d}")
     header = ",".join(header_cols)
-    output_cols = [wavelengths]
-    output_cols = [wavelength_err]
+    output_cols = [wavelengths, wavelength_err]
     for i in range(n_planets):
         output_cols.append(depth_median[:, i])
         output_cols.append(depth_err[:, i])
@@ -676,8 +849,29 @@ def main():
         data = SpectroData.load(spectro_data_file)
     
     print("Data loaded.")
-    print(f"Time: {data.time.shape}")
-     
+    print(f"Data length: {data.time.shape}")
+    
+    timebin_cfg = cfg.get("time_binning", {})
+    # also allow flags.* for backwards compatibility
+    do_timebin = timebin_cfg.get("enabled", False) or flags.get("bin_time", False)
+
+    if do_timebin:
+        dt_seconds = (
+            timebin_cfg.get("dt_seconds", None)
+            or flags.get("bin_dt_seconds", None)
+            or 120.0
+        )
+        method = (
+            timebin_cfg.get("method", None)
+            or flags.get("bin_method", None)
+            or "weighted"
+        )
+
+        data = bin_spectrodata_in_time(data, dt_seconds=float(dt_seconds), method=str(method))
+        print('Finished Binning! Binned data length: ', data.time.shape)
+
+
+
     stringcheck = os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy')
 
     if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS', 'NIRSPEC/G140H', 'NIRSPEC/G235H']:
@@ -685,22 +879,23 @@ def main():
     elif instrument == 'NIRISS/SOSS':
         U_mu_wl = get_limb_darkening(sld, data.wavelengths_unbinned, 0.0, instrument, order=order, ld_profile=ld_profile)
     #print(U_mu_wl)
-    #print(get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order, ld_profile=ld_profile))
-    #print(get_limb_darkening(sld, data.wavelengths_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile))
+    #print(get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument,  ld_profile=ld_profile))
+    #print(get_limb_darkening(sld, data.wavelengths_hr, data.wavelengths_err_hr, instrument,  ld_profile=ld_profile))
     #exit()
     # ----------------------------------------------------
     # WHITELIGHT FITTING
     # ----------------------------------------------------
     if not stringcheck or ('gp' in detrending_type):
         if not os.path.exists(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv'):
-            plt.scatter(data.wl_time, data.wl_flux)
-            plt.savefig('stuff.png')
+            plt.scatter(data.wl_time, data.wl_flux, c='k', s=6, alpha=0.5)
+            plt.savefig(f'{output_dir}/stuff.png')
             plt.close()
             print('Fitting whitelight for outliers and bestfit parameters')
             hyper_params_wl = {
                 "duration": PRIOR_DUR,
                 "t0": PRIOR_T0,
                 'period': PERIOD_FIXED,
+                'u': U_mu_wl
             }
             if 'spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
@@ -732,7 +927,7 @@ def main():
                 init_params_wl['A'] = 0.001; init_params_wl['tau'] = 0.5
             if 'gp' in detrending_type:
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
-                init_params_wl['GP_log_rho'] = jnp.log(1)
+                init_params_wl['GP_log_rho'] = jnp.log(0.1)
             if 'linear_discontinuity' in detrending_type:
                 init_params_wl['t_jump'] = 59791.12
                 init_params_wl['jump'] = -0.001 
@@ -745,25 +940,130 @@ def main():
                 init_params_prefit = init_params_wl.copy()
                 init_params_prefit.pop('GP_log_sigma', None)
                 init_params_prefit.pop('GP_log_rho', None)
-                soln_prefit = optimx.optimize(whitelight_model_prefit, start=init_params_prefit)(
+                soln = optimx.optimize(whitelight_model_prefit, start=init_params_prefit)(
                     key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
                 )
+                '''
                 print("--- Initializing GP with Pre-Fit Parameters ---")
                 for k in soln_prefit.keys():
                     if k in init_params_wl: init_params_wl[k] = soln_prefit[k]
                 
                 print("Please make sure config is CPU for GP whitelight fit!")
-                init_params_wl['GP_log_sigma'] = jnp.log(5.0 * jnp.nanmedian(data.wl_flux_err))
-                init_params_wl['GP_log_rho'] = jnp.log(0.1)
+                init_params_wl['GP_log_sigma'] = jnp.log( jnp.nanmedian(data.wl_flux_err))
+                init_params_wl['GP_log_rho'] = jnp.log(0.05)
                 whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
                 soln = optimx.optimize(whitelight_model_for_run, start=init_params_wl)(
                     key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl
                 )
+                '''
             else:
                 soln =  optimx.optimize(whitelight_model_for_run, start=init_params_wl)(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+            
+            
+# -----------------------------------------------------------------------
+            # DIAGNOSTIC: Plot Init vs. Optimized Model (Sanity Check)
+            # -----------------------------------------------------------------------
+            print("Plotting Initial vs. Optimized Model sanity check...")
+            
+            def _get_sanity_model(params, t_vals):
+                # Helper to select the correct compute function
+                if 'gp' in detrending_type:
+                    return compute_lc_linear(params, t_vals)
+                elif detrending_type == 'linear': return compute_lc_linear(params, t_vals)
+                elif detrending_type == 'quadratic': return compute_lc_quadratic(params, t_vals)
+                elif detrending_type == 'cubic': return compute_lc_cubic(params, t_vals)
+                elif detrending_type == 'quartic': return compute_lc_quartic(params, t_vals)
+                elif detrending_type == 'explinear': return compute_lc_explinear(params, t_vals)
+                elif detrending_type == 'linear_discontinuity': return compute_lc_linear_discontinuity(params, t_vals)
+                elif detrending_type == 'spot': return compute_lc_spot(params, t_vals)
+                elif detrending_type == 'none': return compute_lc_none(params, t_vals)
+                else: return compute_lc_linear(params, t_vals)
+            def _soln_to_physical_params(soln, base_params, n_planets=1):
+                """
+                base_params: dict that already has 'period' (and can have default u/c/v, etc.)
+                Returns a new dict with duration, b, rors, t0 (arrays) filled from soln if present.
+                """
+                p = dict(base_params)
+
+                # ---- limb darkening ----
+                # If optimizer solved for 'u' directly, use it; otherwise keep base prior.
+                if "u" in soln:
+                    p["u"] = soln["u"]
+
+                # ---- scalar detrend params often overlap fine ----
+                for k in ["c", "v", "a2", "a3", "a4","A", "tau", "t_break", "delta", "A_spot", "t_spot", "sigma_spot"]:
+                    if k in soln:
+                        p[k] = soln[k]
+
+                # ---- transit geometry: soln is in transformed sample sites ----
+                # Only override if those sites exist in soln; otherwise keep whatever is in base.
+                def have_all(prefix):
+                    return all(f"{prefix}_{i}" in soln for i in range(n_planets))
+
+                if have_all("logD"):
+                    p["duration"] = jnp.array([jnp.exp(soln[f"logD_{i}"]) for i in range(n_planets)])
+                if have_all("_b"):
+                    p["b"] = jnp.array([jnp.abs(soln[f"_b_{i}"]) for i in range(n_planets)])
+                if have_all("depths"):
+                    p["rors"] = jnp.array([jnp.sqrt(soln[f"depths_{i}"]) for i in range(n_planets)])
+                if have_all("t0"):
+                    p["t0"] = jnp.array([soln[f"t0_{i}"] for i in range(n_planets)])
+
+                return p
+
+            try:
+
+                    # 1) base params from priors + init guesses
+                params_complete = hyper_params_wl.copy()
+                params_complete.update(init_params_wl)
+
+                # If your init dict uses scalar b/rors, make sure they are arrays (n_planets=1 typical)
+                # (Only needed if your compute_* expects arrays)
+                n_planets = 1  # or whatever you use elsewhere
+                if np.isscalar(params_complete.get("b", 0.0)):
+                    params_complete["b"] = jnp.array([params_complete["b"]])
+                if np.isscalar(params_complete.get("rors", 0.0)):
+                    params_complete["rors"] = jnp.array([params_complete["rors"]])
+                if np.isscalar(params_complete.get("t0", 0.0)):
+                    params_complete["t0"] = jnp.array([params_complete["t0"]])
+                if np.isscalar(params_complete.get("duration", 0.0)):
+                    params_complete["duration"] = jnp.array([params_complete["duration"]])
+
+                # 2) optimized params: convert soln -> physical keys
+                params_opt = _soln_to_physical_params(soln, params_complete, n_planets=n_planets)
+
+                # 3) Compute fluxes
+                flux_init = _get_sanity_model(params_complete, data.wl_time)
+                flux_opt  = _get_sanity_model(params_opt,      data.wl_time)
+                print('Optimized Init Params:', params_opt)    
+                # 3. Plot
+                plt.figure(figsize=(10, 6))
+                plt.scatter(data.wl_time, data.wl_flux, c='k', s=10, alpha=0.3, label='Data')
+                
+                plt.plot(data.wl_time, flux_init, color='red', linestyle='--', lw=2, alpha=0.7, 
+                         label='Init Guess')
+                plt.plot(data.wl_time, flux_opt, color='blue', lw=2.5, 
+                         label='Optimized (Gradient)')
+                
+                plt.title(f'Sanity Check: {detrending_type} (GP Pre-fit: {"gp" in detrending_type})')
+                plt.xlabel('Time (BJD)')
+                plt.ylabel('Flux')
+                plt.legend()
+                plt.tight_layout()
+                
+                sanity_plot_path = f'{output_dir}/00_{instrument_full_str}_init_vs_opt_check.png'
+                plt.savefig(sanity_plot_path)
+                plt.close()
+                print(f"Saved sanity check plot to: {sanity_plot_path}")
+                
+            except Exception as e:
+                print(f"Could not create sanity plot: {e}")
+                # Debugging aid if it still fails
+                # print(f"Params keys available: {params_opt.keys()}")
+            # -----------------------------------------------------------------------
             mcmc = numpyro.infer.MCMC(
                 numpyro.infer.NUTS(whitelight_model_for_run, regularize_mass_matrix=False, init_strategy=numpyro.infer.init_to_value(values=soln), target_accept_prob=0.9),
-                num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True, chain_method='vectorized'
+                num_warmup=1000, num_samples=1000, progress_bar=True, jit_model_args=True
             )
             mcmc.run(key_master, data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
             inf_data = az.from_numpyro(mcmc)
@@ -991,7 +1291,23 @@ def main():
             transit_only_model = compute_transit_model(bestfit_params_wl, t_masked) + 1.0
             residuals_detrended = detrended_flux - transit_only_model 
 
-            fig = plt.figure(figsize=(16, 14))
+            
+            # =========================================================================
+            # FIGURE 15: UPDATED FULL-SCREEN LAYOUT WITH HR WATERFALL
+            # =========================================================================
+            # Increase figsize to accommodate the new columns
+            fig = plt.figure(figsize=(26, 12))
+            
+            # Use 4 columns: 
+            # 0,1: Original Diagnostics (LCs, Beta, Hist)
+            # 2: HR Flux + Model
+            # 3: HR Residuals
+            gs = gridspec.GridSpec(3, 4, figure=fig, 
+                                height_ratios=[1, 1, 1.5], 
+                                width_ratios=[1, 1, 1.3, 1.3], 
+                                hspace=0.3, wspace=0.25)
+
+            # --- LEFT SIDE: Standard Whitelight Diagnostics ---
             b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
                                                 jnp.array(data.wl_flux), 
                                                 bestfit_params_wl['duration'])
@@ -1004,9 +1320,7 @@ def main():
                                             bestfit_params_wl['duration'])
             bin_style = dict(c='darkviolet', edgecolors='darkslateblue', s=40,  zorder=10, label='Binned (8/dur)')
 
-            gs = gridspec.GridSpec(3, 2, figure=fig, height_ratios=[1, 1, 1.5], 
-                                   width_ratios=[1, 1], hspace=0.3, wspace=0.3)
-
+            # Row 0, Col 0: Raw LC
             ax1 = fig.add_subplot(gs[0, 0])
             ax1.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
             ax1.scatter(np.array(b_time), np.array(b_flux), **bin_style)
@@ -1014,6 +1328,7 @@ def main():
             ax1.set_ylabel('Flux', fontsize=12)
             ax1.tick_params(labelbottom=False)
 
+            # Row 1, Col 0: Raw LC + Model
             ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
             ax2.scatter(data.wl_time, data.wl_flux, c='k', s=4, alpha=0.2)
             ax2.scatter(np.array(b_time), np.array(b_flux), **bin_style)
@@ -1022,6 +1337,7 @@ def main():
             ax2.set_ylabel('Flux', fontsize=12)
             ax2.tick_params(labelbottom=False)
 
+            # Row 2, Col 0: Nested Grid for Detrended LC & Residuals
             gs_nested = gridspec.GridSpecFromSubplotSpec(
                 2, 1, subplot_spec=gs[2, 0], 
                 height_ratios=[2, 1],
@@ -1029,7 +1345,6 @@ def main():
             )
 
             ax3_top = fig.add_subplot(gs_nested[0], sharex=ax1)
-
             ax3_top.scatter(t_masked, detrended_flux, c='k', s=4, alpha=0.2, label='Detrended Data')
             ax3_top.plot(t_masked, transit_only_model, color="mediumorchid", lw=2, zorder=3, label='Transit Model')
             ax3_top.scatter(np.array(b_time_det), np.array(b_flux_det), **bin_style)
@@ -1038,17 +1353,15 @@ def main():
             plt.setp(ax3_top.get_xticklabels(), visible=False)
 
             ax3_bot = fig.add_subplot(gs_nested[1], sharex=ax3_top)
-    
-
             ax3_bot.scatter(t_masked, residuals_detrended * 1e6, c='k', s=4, alpha=0.2)
             ax3_bot.axhline(0, color='mediumorchid', lw=4, zorder=3, linestyle='--')
             ax3_bot.scatter(np.array(b_time_det), np.array(b_res_det) * 1e6 , **bin_style)
             ax3_bot.set_ylabel('Res. (ppm)', fontsize=10)
             ax3_bot.set_xlabel('Time (BJD)', fontsize=12)
 
+            # Beta Stats
             dt = np.median(np.diff(data.wl_time)) * 86400 
             residuals_arr = np.array(wl_residual[~wl_mad_mask])
-
             beta, bin_sizes_min, measured_rms, expected_rms = calculate_beta_metrics(residuals_arr, dt)
             mc_betas, rms_lo_1, rms_hi_1, rms_lo_2, rms_hi_2 = run_beta_monte_carlo(residuals_arr, dt, n_sims=500)
 
@@ -1061,6 +1374,7 @@ def main():
             print(f"MC Std Dev:    {std_sim:.3f}")
             print(f"Significance:  {z_score:.2f} sigma")
 
+            # Row 0-1, Col 1: RMS Plot
             ax_rms = fig.add_subplot(gs[0:2, 1])
             ax_rms.loglog(bin_sizes_min, expected_rms * 1e6, 'k--', lw=1.5, label='Theory $1/\sqrt{N}$')
             ax_rms.fill_between(bin_sizes_min, rms_lo_2 * 1e6, rms_hi_2 * 1e6, color='gray', alpha=0.2, label='White Noise ($2\sigma$)')
@@ -1071,29 +1385,104 @@ def main():
             ax_rms.set_title('Time-Correlated Noise', fontsize=14)
             ax_rms.grid(True, which="both", alpha=0.2)
 
+            # Row 2, Col 1: Beta Histogram
             ax_beta = fig.add_subplot(gs[2, 1])
-
             n, bins, patches = ax_beta.hist(mc_betas, bins=30, color='silver', alpha=0.6, density=True, label='Simulated White Noise')
-
             xmin, xmax = ax_beta.get_xlim()
             x_plot = np.linspace(xmin, xmax, 100)
             p_plot = norm.pdf(x_plot, mu_sim, std_sim)
             ax_beta.plot(x_plot, p_plot, 'k--', linewidth=2, label='Gaussian Fit')
-
             ax_beta.axvline(beta, color='teal', lw=3, label=f'Measured: {beta:.2f}')
-
             sig_color = 'green' if abs(z_score) < 2.0 else ('orange' if abs(z_score) < 3.0 else 'firebrick')
             ax_beta.text(0.95, 0.85, f"Significance: {z_score:.1f}$\sigma$", 
                        transform=ax_beta.transAxes, ha='right', fontsize=14, color=sig_color, fontweight='bold')
-
             ax_beta.set_xlabel('Beta Factor', fontsize=12)
             ax_beta.set_ylabel('Probability Density', fontsize=12)
             ax_beta.set_title("Beta Significance Test", fontsize=14)
 
+            # --- RIGHT SIDE: High Resolution Waterfall & Residuals ---
+            gs_right = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[:, 2:], wspace=0.05)
+            
+            ax_hr_flux = fig.add_subplot(gs_right[0])
+            ax_hr_res = fig.add_subplot(gs_right[1], sharey=ax_hr_flux) 
+
+            # Prepare Data
+            n_hr_bins = data.flux_hr.shape[0]
+            hr_indices = np.linspace(0, n_hr_bins-1, 10, dtype=int)
+            colors = cm.turbo(np.linspace(0, 1, 10))
+            
+            est_depth = np.nanmedian(bestfit_params_wl['depths'])
+            if est_depth < 1e-4: offset_step = 0.0025
+            elif est_depth < 1e-3: offset_step = 0.0075
+            else: offset_step = 0.02
+
+            wl_model_vector = np.array(transit_only_model) # Baseline at 1.0
+            wl_time_vector = np.array(t_masked)
+            time_center = np.median(wl_time_vector)
+
+            res_zoom_factor = 2.0 
+
+            for idx_i, bin_idx in enumerate(hr_indices):
+                raw_flux_hr = data.flux_hr[bin_idx]
+                flux_hr_masked = raw_flux_hr[~wl_mad_mask]
+                
+                # --- UPDATED NORMALIZATION ---
+                # Normalize by the baseline (first 50 points) to align with the model baseline of 1.0
+                baseline_norm = np.nanmedian(flux_hr_masked[:50])
+                norm_flux_hr = flux_hr_masked / baseline_norm
+                
+                # Calculate residuals (Data - Model)
+                # Since both are baseline-normalized to 1.0, the baseline residuals will naturally be 0.0
+                residuals_hr_check = norm_flux_hr - wl_model_vector
+                
+                mad_ppm = 1.4826 * np.nanmedian(np.abs(residuals_hr_check)) * 1e6
+
+                y_offset = idx_i * offset_step
+                
+                # Plot Flux + Offset
+                ax_hr_flux.scatter(wl_time_vector - time_center, norm_flux_hr + y_offset, 
+                                 color=colors[idx_i], s=5, alpha=0.6, edgecolors='none')
+                
+                # Plot Model + Offset
+                ax_hr_flux.plot(wl_time_vector - time_center, wl_model_vector + y_offset, 
+                              color='dimgray', lw=2.0, alpha=0.3, zorder=2)
+                ax_hr_flux.plot(wl_time_vector - time_center, wl_model_vector + y_offset, 
+                              color=colors[idx_i], lw=1.0, alpha=0.9, linestyle='-', zorder=3)
+                
+                # Label Wavelength (Floating above)
+                wl_val = data.wavelengths_hr[bin_idx]
+                annotation_y = 1.0 + y_offset + (offset_step * 0.33)
+                ax_hr_flux.text(wl_time_vector.min() - time_center, annotation_y, 
+                              f"{wl_val:.2f} $\mu$m", 
+                              fontsize=9, fontweight='bold', color=colors[idx_i])
+
+                # Plot Residuals + Offset (Zoomed)
+                res_plotted = (residuals_hr_check * res_zoom_factor) + 1.0 + y_offset
+                
+                ax_hr_res.scatter(wl_time_vector - time_center, res_plotted, 
+                                color=colors[idx_i], s=5, alpha=0.6, edgecolors='none')
+                
+                # Label Sigma on Residual Plot
+                ax_hr_res.text(wl_time_vector.min() - time_center, annotation_y, 
+                               f"$\sigma$={int(mad_ppm)} ppm", 
+                               fontsize=9, fontweight='bold', color=colors[idx_i])
+                
+                # Zero line
+                ax_hr_res.axhline(1.0 + y_offset, color='black', linestyle='--', lw=1, alpha=0.3)
+
+            ax_hr_flux.set_xlabel("Time from Mid-Transit (days)", fontsize=12)
+            ax_hr_res.set_xlabel("Time from Mid-Transit (days)", fontsize=12)
+            
+            ax_hr_flux.set_yticks([])
+            ax_hr_res.set_yticks([])
+            
             plt.tight_layout()
             plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
             plt.close(fig)
+            # =========================================================================
 
+
+            
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
             
             if 'gp' in detrending_type:
@@ -1176,7 +1565,6 @@ def main():
     best_poly_coeffs_c, best_poly_coeffs_v = None, None
     best_poly_coeffs_u1, best_poly_coeffs_u2 = None, None
     spot_trend, jump_trend = None, None
-
     # ----------------------------------------------------
     # LOW RES ANALYSIS
     # ----------------------------------------------------
