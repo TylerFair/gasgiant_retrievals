@@ -35,7 +35,6 @@ def compute_transit_model(params, t):
         )
         return limb_dark_light_curve(orbit, params["u"])(t)
 
-    # vmap over planets
     batched_lcs = jax.vmap(get_lc)(periods, durations, t0s, bs, rorss)
     total_flux = jnp.sum(batched_lcs, axis=0)
     return total_flux
