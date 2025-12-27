@@ -1080,7 +1080,6 @@ def main():
             if 'c1' in wl_samples and ld_profile == 'power2':
                 bestfit_params_wl['c1'] = jnp.nanmedian(wl_samples['c1'], axis=0)
                 bestfit_params_wl['c2'] = jnp.nanmedian(wl_samples['c2'], axis=0)
-                
                 POLY_DEGREE = 12
                 MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
                 power2_profile = get_I_power2(bestfit_params_wl['c1'], bestfit_params_wl['c2'], MUS)
@@ -1480,7 +1479,6 @@ def main():
             plt.savefig(f'{output_dir}/15_{instrument_full_str}_whitelight_summary.png')
             plt.close(fig)
             # =========================================================================
-
 
             
             np.save(f'{output_dir}/{instrument_full_str}_whitelight_outlier_mask.npy', arr=wl_mad_mask)
