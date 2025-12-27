@@ -333,6 +333,12 @@ def compute_aic(n, residuals, k):
     aic = 2*k + n * np.log(rss/n)
     return aic
 
+def get_asym_errors(data, axis=0):
+    p16, p50, p84 = jnp.nanpercentile(data, jnp.array([16, 50, 84]), axis=axis)
+    err_low = p50 - p16
+    err_high = p84 - p50
+    return p50, err_low, err_high
+
 def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None, ld_profile='quadratic'):
     if instrument == 'NIRSPEC/G395H':
         mode = "JWST_NIRSpec_G395H"
@@ -417,6 +423,12 @@ def get_limb_darkening(sld, wavelengths, wavelength_err, instrument, order=None,
         U_mu = jnp.array(U_mu)
     return U_mu
 
+def compute_u_from_c(c1, c2):
+    POLY_DEGREE = 12
+    MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
+    profile = get_I_power2(c1, c2, MUS)
+    return calc_poly_coeffs(MUS, profile, poly_degree=POLY_DEGREE)
+
 def fit_polynomial(x, y, poly_orders):
     best_order = None
     best_aic = np.inf
@@ -476,82 +488,66 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
     n_times = len(time)
     print(f"Saving detailed fit results to {output_prefix}_*.csv")
     param_rows = []
+    
+    def get_stats_local(data_slice):
+        med, low, high = get_asym_errors(data_slice)
+        return med, np.std(data_slice), low, high
+
     for i in range(n_wavelengths):
+        rors_med, rors_std, rors_l, rors_h = get_stats_local(samples['rors'][:, i])
+        depth_med, depth_std, depth_l, depth_h = get_stats_local(samples['rors'][:, i]**2)
+        
         row = {
             'wavelength': wavelengths[i],
             'wavelength_err': wavelengths_err[i],
-            'rors': np.nanmedian(samples['rors'][:, i]),
-            'rors_err': np.std(samples['rors'][:, i]),
-            'depth': np.nanmedian(samples['rors'][:, i]**2),
-            'depth_err': np.std(samples['rors'][:, i]**2),
-            'u1': np.nanmedian(samples['u'][:, i, 0]),
-            'u1_err': np.std(samples['u'][:, i, 0]),
-            'u2': np.nanmedian(samples['u'][:, i, 1]),
-            'u2_err': np.std(samples['u'][:, i, 1]),
+            'rors': rors_med,
+            'rors_err': rors_std,
+            'rors_err_low': rors_l,
+            'rors_err_high': rors_h,
+            'depth': depth_med,
+            'depth_err': depth_std,
+            'depth_err_low': depth_l,
+            'depth_err_high': depth_h,
         }
+        
+        if 'u' in samples:
+            u1_med, u1_std, u1_l, u1_h = get_stats_local(samples['u'][:, i, 0])
+            u2_med, u2_std, u2_l, u2_h = get_stats_local(samples['u'][:, i, 1])
+            row.update({
+                'u1': u1_med, 'u1_err': u1_std, 'u1_err_low': u1_l, 'u1_err_high': u1_h,
+                'u2': u2_med, 'u2_err': u2_std, 'u2_err_low': u2_l, 'u2_err_high': u2_h
+            })
 
         if 'c1' in samples:
-            row['c1'] = np.nanmedian(samples['c1'][:, i])
-            row['c1_err'] = np.std(samples['c1'][:, i])
+            c1_med, c1_std, c1_l, c1_h = get_stats_local(samples['c1'][:, i])
+            row.update({'c1': c1_med, 'c1_err': c1_std, 'c1_err_low': c1_l, 'c1_err_high': c1_h})
             # Override u1/u2 with physical parameters for power2 profile
-            row['u1'] = row['c1']
-            row['u1_err'] = row['c1_err']
+            row.update({'u1': c1_med, 'u1_err': c1_std, 'u1_err_low': c1_l, 'u1_err_high': c1_h})
 
         if 'c2' in samples:
-            row['c2'] = np.nanmedian(samples['c2'][:, i])
-            row['c2_err'] = np.std(samples['c2'][:, i])
+            c2_med, c2_std, c2_l, c2_h = get_stats_local(samples['c2'][:, i])
+            row.update({'c2': c2_med, 'c2_err': c2_std, 'c2_err_low': c2_l, 'c2_err_high': c2_h})
             # Override u1/u2 with physical parameters for power2 profile
-            row['u2'] = row['c2']
-            row['u2_err'] = row['c2_err']
+            row.update({'u2': c2_med, 'u2_err': c2_std, 'u2_err_low': c2_l, 'u2_err_high': c2_h})
 
         if detrend_type != 'none':
-            row['c'] = np.nanmedian(samples['c'][:, i])
-            row['c_err'] = np.std(samples['c'][:, i])
+            c_med, c_std, c_l, c_h = get_stats_local(samples['c'][:, i])
+            row.update({'c': c_med, 'c_err': c_std, 'c_err_low': c_l, 'c_err_high': c_h})
             # v is not present in pure gp_spectroscopic
             if 'v' in samples:
-                row['v'] = np.nanmedian(samples['v'][:, i])
-                row['v_err'] = np.std(samples['v'][:, i])
+                v_med, v_std, v_l, v_h = get_stats_local(samples['v'][:, i])
+                row.update({'v': v_med, 'v_err': v_std, 'v_err_low': v_l, 'v_err_high': v_h})
         
         # Add other potential parametric terms
-        if 'v2' in samples:
-            row['v2'] = np.nanmedian(samples['v2'][:, i])
-            row['v2_err'] = np.std(samples['v2'][:, i])
-        if 'v3' in samples:
-            row['v3'] = np.nanmedian(samples['v3'][:, i])
-            row['v3_err'] = np.std(samples['v3'][:, i])
-        if 'v4' in samples:
-            row['v4'] = np.nanmedian(samples['v4'][:, i])
-            row['v4_err'] = np.std(samples['v4'][:, i])
-        if 'A' in samples:
-            row['A'] = np.nanmedian(samples['A'][:, i])
-            row['A_err'] = np.std(samples['A'][:, i])
-        if 'tau' in samples:
-            row['tau'] = np.nanmedian(samples['tau'][:, i])
-            row['tau_err'] = np.std(samples['tau'][:, i])
-        if 't_jump' in samples:
-            row['t_jump'] = np.nanmedian(samples['t_jump'][:, i])
-            row['t_jump_err'] = np.std(samples['t_jump'][:, i])
-        if 'jump' in samples:
-            row['jump'] = np.nanmedian(samples['jump'][:, i])
-            row['jump_err'] = np.std(samples['jump'][:, i])
-        if 'spot_amp' in samples:
-            row['spot_amp'] = np.nanmedian(samples['spot_amp'][:, i])
-            row['spot_amp_err'] = np.std(samples['spot_amp'][:, i])
-            row['spot_mu'] = np.nanmedian(samples['spot_mu'][:, i])
-            row['spot_mu_err'] = np.std(samples['spot_mu'][:, i])
-            row['spot_sigma'] = np.nanmedian(samples['spot_sigma'][:, i])
-            row['spot_sigma_err'] = np.std(samples['spot_sigma'][:, i])
-
-        # Spectroscopic template amplitudes
-        if 'A_gp' in samples:
-            row['A_gp'] = np.nanmedian(samples['A_gp'][:, i])
-            row['A_gp_err'] = np.std(samples['A_gp'][:, i])
-        if 'A_spot' in samples:
-            row['A_spot'] = np.nanmedian(samples['A_spot'][:, i])
-            row['A_spot_err'] = np.std(samples['A_spot'][:, i])
-        if 'A_jump' in samples:
-            row['A_jump'] = np.nanmedian(samples['A_jump'][:, i])
-            row['A_jump_err'] = np.std(samples['A_jump'][:, i])
+        for key in ['v2', 'v3', 'v4', 'A', 'tau', 't_jump', 'jump', 'spot_amp', 'spot_mu', 'spot_sigma', 'A_gp', 'A_spot', 'A_jump']:
+            if key in samples:
+                med, std, low, high = get_stats_local(samples[key][:, i])
+                row.update({
+                    key: med,
+                    f'{key}_err': std,
+                    f'{key}_err_low': low,
+                    f'{key}_err_high': high
+                })
             
         param_rows.append(row)
 
@@ -1077,30 +1073,54 @@ def main():
             bestfit_params_wl = {
                 'period': PERIOD_FIXED,
             }
+            # Helper to set stats in bestfit_params_wl
+            def set_param_stats(name, data_samples, axis=0):
+                med, low, high = get_asym_errors(data_samples, axis=axis)
+                bestfit_params_wl[name] = med
+                bestfit_params_wl[f'{name}_err_low'] = low
+                bestfit_params_wl[f'{name}_err_high'] = high
+
             if 'c1' in wl_samples and ld_profile == 'power2':
-                bestfit_params_wl['c1'] = jnp.nanmedian(wl_samples['c1'], axis=0)
-                bestfit_params_wl['c2'] = jnp.nanmedian(wl_samples['c2'], axis=0)
+                set_param_stats('c1', wl_samples['c1'], axis=0)
+                set_param_stats('c2', wl_samples['c2'], axis=0)
                 POLY_DEGREE = 12
                 MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
                 power2_profile = get_I_power2(bestfit_params_wl['c1'], bestfit_params_wl['c2'], MUS)
                 u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
                 bestfit_params_wl['u'] = u_poly
             else:
-                bestfit_params_wl['u'] = jnp.nanmedian(wl_samples['u'], axis=0)
+                set_param_stats('u', wl_samples['u'], axis=0)
 
             durations_fit, t0s_fit, bs_fit, rors_fit = [], [], [], []
             durations_err, t0s_err, bs_err, rors_err, depths_err = [], [], [], [], []
+            durations_err_low, t0s_err_low, bs_err_low, rors_err_low, depths_err_low = [], [], [], [], []
+            durations_err_high, t0s_err_high, bs_err_high, rors_err_high, depths_err_high = [], [], [], [], []
 
             for i in range(n_planets):
-                durations_fit.append(jnp.nanmedian(wl_samples[f'duration_{i}']))
-                t0s_fit.append(jnp.nanmedian(wl_samples[f't0_{i}']))
-                bs_fit.append(jnp.nanmedian(wl_samples[f'b_{i}']))
-                rors_fit.append(jnp.nanmedian(wl_samples[f'rors_{i}']))
+                # Calculate stats for planet parameters
+                med_d, low_d, high_d = get_asym_errors(wl_samples[f'duration_{i}'])
+                med_t0, low_t0, high_t0 = get_asym_errors(wl_samples[f't0_{i}'])
+                med_b, low_b, high_b = get_asym_errors(wl_samples[f'b_{i}'])
+                med_r, low_r, high_r = get_asym_errors(wl_samples[f'rors_{i}'])
+                med_depth, low_depth, high_depth = get_asym_errors(wl_samples[f'rors_{i}']**2)
+
+                durations_fit.append(med_d)
+                t0s_fit.append(med_t0)
+                bs_fit.append(med_b)
+                rors_fit.append(med_r)
+                
+                # Keep std for backward compatibility in arrays if needed, but we save asyms now
                 durations_err.append(jnp.std(wl_samples[f'duration_{i}']))
                 t0s_err.append(jnp.std(wl_samples[f't0_{i}']))
                 bs_err.append(jnp.std(wl_samples[f'b_{i}']))
                 rors_err.append(jnp.std(wl_samples[f'rors_{i}']))
                 depths_err.append(jnp.std(wl_samples[f'rors_{i}']**2))
+
+                durations_err_low.append(low_d); durations_err_high.append(high_d)
+                t0s_err_low.append(low_t0); t0s_err_high.append(high_t0)
+                bs_err_low.append(low_b); bs_err_high.append(high_b)
+                rors_err_low.append(low_r); rors_err_high.append(high_r)
+                depths_err_low.append(low_depth); depths_err_high.append(high_depth)
 
             bestfit_params_wl['duration'] = jnp.array(durations_fit)
             bestfit_params_wl['t0'] = jnp.array(t0s_fit)
@@ -1113,35 +1133,44 @@ def main():
             bestfit_params_wl['b_err'] = jnp.array(bs_err)
             bestfit_params_wl['rors_err'] = jnp.array(rors_err)
             bestfit_params_wl['depths_err'] = jnp.array(depths_err)
-            bestfit_params_wl['error'] = jnp.nanmedian(wl_samples['error'])
+            
+            bestfit_params_wl['duration_err_low'] = jnp.array(durations_err_low)
+            bestfit_params_wl['duration_err_high'] = jnp.array(durations_err_high)
+            bestfit_params_wl['t0_err_low'] = jnp.array(t0s_err_low)
+            bestfit_params_wl['t0_err_high'] = jnp.array(t0s_err_high)
+            bestfit_params_wl['b_err_low'] = jnp.array(bs_err_low)
+            bestfit_params_wl['b_err_high'] = jnp.array(bs_err_high)
+            bestfit_params_wl['rors_err_low'] = jnp.array(rors_err_low)
+            bestfit_params_wl['rors_err_high'] = jnp.array(rors_err_high)
+            bestfit_params_wl['depths_err_low'] = jnp.array(depths_err_low)
+            bestfit_params_wl['depths_err_high'] = jnp.array(depths_err_high)
+
+            set_param_stats('error', wl_samples['error'])
             
             if detrending_type != 'none':
-                bestfit_params_wl['c'] = jnp.nanmedian(wl_samples['c'])
+                set_param_stats('c', wl_samples['c'])
                 if detrending_type != 'gp': 
-                    bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
+                    set_param_stats('v', wl_samples['v'])
                 if 'v' in wl_samples and 'v' not in bestfit_params_wl:
-                     bestfit_params_wl['v'] = jnp.nanmedian(wl_samples['v'])
+                     set_param_stats('v', wl_samples['v'])
 
-            if 'v2' in wl_samples:
-                bestfit_params_wl['v2'] = jnp.nanmedian(wl_samples['v2'])
-            if 'v3' in wl_samples:
-                bestfit_params_wl['v3'] = jnp.nanmedian(wl_samples['v3'])
-            if 'v4' in wl_samples:
-                bestfit_params_wl['v4'] = jnp.nanmedian(wl_samples['v4'])
+            if 'v2' in wl_samples: set_param_stats('v2', wl_samples['v2'])
+            if 'v3' in wl_samples: set_param_stats('v3', wl_samples['v3'])
+            if 'v4' in wl_samples: set_param_stats('v4', wl_samples['v4'])
             if 'explinear' in detrending_type:
-                bestfit_params_wl['A'] = jnp.nanmedian(wl_samples['A'])
-                bestfit_params_wl['tau'] = jnp.nanmedian(wl_samples['tau'])
+                set_param_stats('A', wl_samples['A'])
+                set_param_stats('tau', wl_samples['tau'])
             if 'spot' in detrending_type:
-                bestfit_params_wl['spot_amp'] = jnp.nanmedian(wl_samples['spot_amp'])
-                bestfit_params_wl['spot_mu'] = jnp.nanmedian(wl_samples['spot_mu'])
-                bestfit_params_wl['spot_sigma'] = jnp.nanmedian(wl_samples['spot_sigma'])
+                set_param_stats('spot_amp', wl_samples['spot_amp'])
+                set_param_stats('spot_mu', wl_samples['spot_mu'])
+                set_param_stats('spot_sigma', wl_samples['spot_sigma'])
             if 'linear_discontinuity' in detrending_type:
-                bestfit_params_wl['t_jump'] = jnp.nanmedian(wl_samples['t_jump'])
-                bestfit_params_wl['jump'] = jnp.nanmedian(wl_samples['jump'])
+                set_param_stats('t_jump', wl_samples['t_jump'])
+                set_param_stats('jump', wl_samples['jump'])
     
             if 'gp' in detrending_type:
-                bestfit_params_wl['GP_log_sigma'] = jnp.nanmedian(wl_samples['GP_log_sigma'])
-                bestfit_params_wl['GP_log_rho'] = jnp.nanmedian(wl_samples['GP_log_rho'])
+                set_param_stats('GP_log_sigma', wl_samples['GP_log_sigma'])
+                set_param_stats('GP_log_rho', wl_samples['GP_log_rho'])
 
             spot_trend, jump_trend = None, None
             if 'spot' in detrending_type:
@@ -1502,28 +1531,67 @@ def main():
                     'b': bestfit_params_wl['b'][i],
                     'rors': bestfit_params_wl['rors'][i],
                     'depths': bestfit_params_wl['depths'][i],
+                    # Errors
+                    'duration_err': bestfit_params_wl['duration_err'][i],
+                    't0_err': bestfit_params_wl['t0_err'][i],
+                    'b_err': bestfit_params_wl['b_err'][i],
+                    'rors_err': bestfit_params_wl['rors_err'][i],
+                    'depths_err': bestfit_params_wl['depths_err'][i],
+                    # Asym Errors
+                    'duration_err_low': bestfit_params_wl['duration_err_low'][i],
+                    'duration_err_high': bestfit_params_wl['duration_err_high'][i],
+                    't0_err_low': bestfit_params_wl['t0_err_low'][i],
+                    't0_err_high': bestfit_params_wl['t0_err_high'][i],
+                    'b_err_low': bestfit_params_wl['b_err_low'][i],
+                    'b_err_high': bestfit_params_wl['b_err_high'][i],
+                    'rors_err_low': bestfit_params_wl['rors_err_low'][i],
+                    'rors_err_high': bestfit_params_wl['rors_err_high'][i],
+                    'depths_err_low': bestfit_params_wl['depths_err_low'][i],
+                    'depths_err_high': bestfit_params_wl['depths_err_high'][i],
                 }
+                
+                def add_scalar_param(name):
+                    if name in bestfit_params_wl:
+                        row[name] = bestfit_params_wl[name]
+                        if f'{name}_err_low' in bestfit_params_wl:
+                            row[f'{name}_err_low'] = bestfit_params_wl[f'{name}_err_low']
+                            row[f'{name}_err_high'] = bestfit_params_wl[f'{name}_err_high']
+
                 if detrending_type != 'none':
-                    row['c'] = bestfit_params_wl['c']
-                    if 'v' in bestfit_params_wl: row['v'] = bestfit_params_wl['v']
+                    add_scalar_param('c')
+                    add_scalar_param('v')
                 
                 if 'c1' in bestfit_params_wl:
+                    add_scalar_param('c1')
+                    add_scalar_param('c2')
+                    # Alias for u1/u2
                     row['u1'] = bestfit_params_wl['c1']
                     row['u2'] = bestfit_params_wl['c2']
-                    row['c1'] = bestfit_params_wl['c1']
-                    row['c2'] = bestfit_params_wl['c2']
+                    row['u1_err_low'] = bestfit_params_wl['c1_err_low']
+                    row['u1_err_high'] = bestfit_params_wl['c1_err_high']
+                    row['u2_err_low'] = bestfit_params_wl['c2_err_low']
+                    row['u2_err_high'] = bestfit_params_wl['c2_err_high']
                 else:
                     row['u1'] = bestfit_params_wl['u'][0]
                     row['u2'] = bestfit_params_wl['u'][1]
+                    if 'u_err_low' in bestfit_params_wl:
+                        row['u1_err_low'] = bestfit_params_wl['u_err_low'][0]
+                        row['u1_err_high'] = bestfit_params_wl['u_err_high'][0]
+                        row['u2_err_low'] = bestfit_params_wl['u_err_low'][1]
+                        row['u2_err_high'] = bestfit_params_wl['u_err_high'][1]
                 
-                if 'explinear' in detrending_type:
-                    row['A'] = bestfit_params_wl['A']
-                    row['tau'] = bestfit_params_wl['tau']
-                elif 'quadratic' in detrending_type:
-                    row['v2'] = bestfit_params_wl['v2']
-                if 'gp' in detrending_type:
-                    row['GP_log_sigma'] = bestfit_params_wl['GP_log_sigma']
-                    row['GP_log_rho'] = bestfit_params_wl['GP_log_rho']
+                add_scalar_param('v2')
+                add_scalar_param('v3')
+                add_scalar_param('v4')
+                add_scalar_param('A')
+                add_scalar_param('tau')
+                add_scalar_param('spot_amp')
+                add_scalar_param('spot_mu')
+                add_scalar_param('spot_sigma')
+                add_scalar_param('t_jump')
+                add_scalar_param('jump')
+                add_scalar_param('GP_log_sigma')
+                add_scalar_param('GP_log_rho')
                 
                 rows.append(row)
         
@@ -1637,7 +1705,15 @@ def main():
 
         samples_lr = get_samples(lr_model_for_run, key_mcmc_lr, time_lr, flux_err_lr, flux_lr, init_params_lr, **model_run_args_lr)
 
-        ld_u_lr = np.array(samples_lr["u"])
+        if 'u' in samples_lr:
+            ld_u_lr = np.array(samples_lr["u"])
+        elif ld_profile == 'power2' and 'c1' in samples_lr:
+            # Reconstruct u from c1/c2 medians for plotting if needed
+            c1_med_lr = jnp.nanmedian(samples_lr['c1'], axis=0)
+            c2_med_lr = jnp.nanmedian(samples_lr['c2'], axis=0)
+            ld_u_lr = jax.vmap(compute_u_from_c)(c1_med_lr, c2_med_lr)
+            ld_u_lr = np.array(ld_u_lr) # Convert to numpy for downstream usage
+
         if detrend_type_multiwave != 'none':
             trend_c_lr = np.array(samples_lr["c"])
             if 'v' in samples_lr: trend_v_lr = np.array(samples_lr["v"])
@@ -1654,13 +1730,6 @@ def main():
         if ld_profile == 'power2':
             c1_med = jnp.nanmedian(samples_lr['c1'], axis=0)
             c2_med = jnp.nanmedian(samples_lr['c2'], axis=0)
-            POLY_DEGREE = 12
-            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-            
-            def compute_u_from_c(c1, c2):
-                 profile = get_I_power2(c1, c2, MUS)
-                 return calc_poly_coeffs(MUS, profile, poly_degree=POLY_DEGREE)
-            
             map_params_lr['u'] = jax.vmap(compute_u_from_c)(c1_med, c2_med)
         else:
             map_params_lr['u'] = jnp.nanmedian(ld_u_lr, axis=0)
@@ -1793,15 +1862,8 @@ def main():
         if ld_profile == 'power2':
             # u1_interp_hr corresponds to c1, u2 to c2
             # We need to reconstruct the polynomial u from these
-            POLY_DEGREE = 12
-            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-            
-            def compute_one_lc_u_interp(c1_val, c2_val):
-                 power2_profile = get_I_power2(c1_val, c2_val, MUS)
-                 return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-            
             # Use vmap to do it for all wavelengths
-            ld_interpolated_hr = jax.vmap(compute_one_lc_u_interp)(jnp.array(u1_interp_hr), jnp.array(u2_interp_hr))
+            ld_interpolated_hr = jax.vmap(compute_u_from_c)(jnp.array(u1_interp_hr), jnp.array(u2_interp_hr))
         else:
             ld_interpolated_hr = jnp.array(np.column_stack((u1_interp_hr, u2_interp_hr)))
             
@@ -1860,7 +1922,7 @@ def main():
     }
     if "u" in samples_hr and ld_profile != 'power2': 
         map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
-    elif "u" in samples_hr and ld_profile == 'power2':
+    elif ld_profile == 'power2':
         # Reconstruct u from c1/c2 medians for high-res
         # Note: samples_hr['u'] contains polynomial coefficients, but we want to use c1/c2 if available
         # But wait, create_vectorized_model samples c1/c2 for power2.
@@ -1868,15 +1930,11 @@ def main():
         if 'c1' in samples_hr:
             c1_med_hr = jnp.nanmedian(samples_hr['c1'], axis=0)
             c2_med_hr = jnp.nanmedian(samples_hr['c2'], axis=0)
-            POLY_DEGREE = 12
-            MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
-            def compute_u_from_c(c1, c2):
-                 profile = get_I_power2(c1, c2, MUS)
-                 return calc_poly_coeffs(MUS, profile, poly_degree=POLY_DEGREE)
             map_params_hr['u'] = jax.vmap(compute_u_from_c)(c1_med_hr, c2_med_hr)
         else:
             # Fallback if c1/c2 not found (should not happen for power2)
-             map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
+             if 'u' in samples_hr:
+                 map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
     if "c" in samples_hr: 
         map_params_hr["c"] = jnp.nanmedian(samples_hr["c"], axis=0)
     if "v" in samples_hr: 
