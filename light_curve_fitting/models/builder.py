@@ -40,21 +40,19 @@ COMPUTE_KERNELS = {
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}' for {n_planets} planets")
 
-    
     # Pre-compute components set for faster lookup
     detrend_components = set(detrend_type.split('+'))
-    
-    # Below is a faster implementation of the arbitrary 
-    # polynomial limb darkening approximation for the 
-    # power2 law. The idea is to:
-    # Pre-compute the intensity grid
-    # Construct a vandermonde matrix of the poly deg
-    # precompute the least-squares operator
-
+    # ---- Precompute constants ONCE ----
     if ld_profile == "power2":
         POLY_DEGREE = 12
         MUS = jnp.linspace(0.0, 1.0, 300, endpoint=True)
+        # Match calc_poly_coeffs behavior: sort mu
+
+        # Build X exactly like your function
         X = jnp.vander(1.0 - MUS, N=POLY_DEGREE + 1, increasing=True)[:, 1:]  # (Nmu, deg)
+
+        # Precompute the least-squares operator P = pinv(X)  (deg, Nmu)
+        # Use NumPy once; then convert to jnp so it can be used inside jitted code.
         P = jnp.asarray(np.linalg.pinv(np.asarray(X)))
 
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
@@ -74,9 +72,11 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
         elif ld_profile == 'power2':
             c1 = numpyro.sample('c1', dist.TruncatedNormal(prior_params['u'][0], 0.2, low=0.0, high=1.0))
             c2 = numpyro.sample('c2', dist.TruncatedNormal(prior_params['u'][1], 0.2, low=0.001, high=1.0)) 
+            
             prof = get_I_power2(c1, c2, MUS)
-            u_poly = P @ (1.0 - prof)
-            u = numpyro.deterministic('u', u_poly)
+            u = P @ (1.0 - prof)
+            #u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
+            #u = numpyro.deterministic('u', u_poly)
         else:
             raise ValueError(f"Unknown ld_profile: {ld_profile}")
 
@@ -154,11 +154,17 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
     compute_lc_kernel = COMPUTE_KERNELS[detrend_type]
-
+        # ---- Precompute constants ONCE ----
     if ld_profile == "power2":
         POLY_DEGREE_LD = 12
         MUS_LD = jnp.linspace(0.0, 1.0, 300, endpoint=True)
+        # Match calc_poly_coeffs behavior: sort mu
+
+        # Build X exactly like your function
         X_LD = jnp.vander(1.0 - MUS_LD, N=POLY_DEGREE_LD + 1, increasing=True)[:, 1:]  # (Nmu, deg)
+
+        # Precompute the least-squares operator P = pinv(X)  (deg, Nmu)
+        # Use NumPy once; then convert to jnp so it can be used inside jitted code.
         P_LD = jnp.asarray(np.linalg.pinv(np.asarray(X_LD)))
 
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
@@ -196,10 +202,13 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     #return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
                 u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
                 '''
+                    # Broadcast to (n_lc, Nmu)
                 profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
+
                 # Batched LS projection: (deg, Nmu) @ (Nmu, n_lc) -> (deg, n_lc) -> transpose
-                u_poly_all = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
-                u = numpyro.deterministic('u', u_poly_all)
+                u = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
+
+                #u = numpyro.deterministic('u', u_poly_all)
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'fixed':
@@ -207,12 +216,12 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 u = numpyro.deterministic('u', ld_fixed)
             elif ld_profile == 'power2':
                 POLY_DEGREE = 12
-                MUS = jnp.linspace(0.0, 1.00, 100, endpoint=True)
+                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
                 c1_mu = numpyro.deterministic('c1', ld_fixed[:, 0])
                 c2_mu = numpyro.deterministic('c2', ld_fixed[:, 1])
                 profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
-                u_poly_all = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
-                u = numpyro.deterministic("u", u_poly_all)
+                u = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
+                #u = numpyro.deterministic("u", u_poly_all)
         else:
             raise ValueError(f"Unknown ld_mode: {ld_mode}")
 
