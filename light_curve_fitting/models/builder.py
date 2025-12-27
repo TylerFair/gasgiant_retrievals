@@ -2,8 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-import numpyro_ext.distributions as distx
-from jaxoplanet.experimental import calc_poly_coeffs
 import numpy as np
 
 from .core import get_I_power2
@@ -14,9 +12,12 @@ from .trends import (
 )
 from .gp import (
     compute_lc_gp_mean, compute_lc_linear_gp_mean, compute_lc_quadratic_gp_mean,
-    compute_lc_explinear_gp_mean, compute_lc_gp_spectroscopic, compute_lc_linear_gp_spectroscopic,
-    compute_lc_quadratic_gp_spectroscopic, compute_lc_explinear_gp_spectroscopic,
-    build_gp, build_gp_linear, build_gp_quadratic, build_gp_explinear
+    compute_lc_cubic_gp_mean, compute_lc_quartic_gp_mean, compute_lc_explinear_gp_mean,
+    compute_lc_gp_spectroscopic, compute_lc_linear_gp_spectroscopic,
+    compute_lc_quadratic_gp_spectroscopic, compute_lc_cubic_gp_spectroscopic,
+    compute_lc_quartic_gp_spectroscopic, compute_lc_explinear_gp_spectroscopic,
+    build_gp, build_gp_linear, build_gp_quadratic, build_gp_cubic, build_gp_quartic,
+    build_gp_explinear
 )
 
 COMPUTE_KERNELS = {
@@ -32,28 +33,25 @@ COMPUTE_KERNELS = {
     'gp_spectroscopic': compute_lc_gp_spectroscopic,
     'linear+gp_spectroscopic': compute_lc_linear_gp_spectroscopic,
     'quadratic+gp_spectroscopic': compute_lc_quadratic_gp_spectroscopic,
+    'cubic+gp_spectroscopic': compute_lc_cubic_gp_spectroscopic,
+    'quartic+gp_spectroscopic': compute_lc_quartic_gp_spectroscopic,
     'explinear+gp_spectroscopic': compute_lc_explinear_gp_spectroscopic,
     'spot_spectroscopic': compute_lc_spot_spectroscopic,
     'linear_discontinuity_spectroscopic': compute_lc_linear_discontinuity_spectroscopic,
 }
+
+def _prepare_power2_poly(degree=12, n_mu=300):
+    mus = jnp.linspace(0.0, 1.0, n_mu, endpoint=True)
+    x = jnp.vander(1.0 - mus, N=degree + 1, increasing=True)[:, 1:]
+    p = jnp.asarray(np.linalg.pinv(np.asarray(x)))
+    return mus, p
     
 def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quadratic'):
     print(f"Building whitelight model with: detrend_type='{detrend_type}' for {n_planets} planets")
 
-    # Pre-compute components set for faster lookup
     detrend_components = set(detrend_type.split('+'))
-    # ---- Precompute constants ONCE ----
     if ld_profile == "power2":
-        POLY_DEGREE = 12
-        MUS = jnp.linspace(0.0, 1.0, 300, endpoint=True)
-        # Match calc_poly_coeffs behavior: sort mu
-
-        # Build X exactly like your function
-        X = jnp.vander(1.0 - MUS, N=POLY_DEGREE + 1, increasing=True)[:, 1:]  # (Nmu, deg)
-
-        # Precompute the least-squares operator P = pinv(X)  (deg, Nmu)
-        # Use NumPy once; then convert to jnp so it can be used inside jitted code.
-        P = jnp.asarray(np.linalg.pinv(np.asarray(X)))
+        MUS, P = _prepare_power2_poly()
 
     def _whitelight_model_static(t, yerr, y=None, prior_params=None):
         durations, t0s, bs, rorss = [], [], [], []
@@ -68,15 +66,13 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             rorss.append(numpyro.deterministic(f"rors_{i}", jnp.sqrt(depths)))
 
         if ld_profile == 'quadratic':
-            u = numpyro.sample("u", dist.Uniform(0.0, 1.0).expand([2]).to_event(1)) #distx.QuadLDParams())
+            u = numpyro.sample("u", dist.Uniform(0.0, 1.0).expand([2]).to_event(1))
         elif ld_profile == 'power2':
             c1 = numpyro.sample('c1', dist.TruncatedNormal(prior_params['u'][0], 0.2, low=0.0, high=1.0))
             c2 = numpyro.sample('c2', dist.TruncatedNormal(prior_params['u'][1], 0.2, low=0.001, high=1.0)) 
             
             prof = get_I_power2(c1, c2, MUS)
             u = P @ (1.0 - prof)
-            #u_poly = calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-            #u = numpyro.deterministic('u', u_poly)
         else:
             raise ValueError(f"Unknown ld_profile: {ld_profile}")
 
@@ -88,7 +84,6 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             "b": jnp.array(bs), "rors": jnp.array(rorss), "u": u,
         }
 
-        # --- PARAMETER SAMPLING BASED ON COMPONENTS ---
         has_offset_term = not detrend_components.isdisjoint({'linear', 'quadratic', 'cubic', 'quartic', 'linear_discontinuity', 'explinear', 'spot', 'gp'})
         if has_offset_term:
             params['c'] = numpyro.sample('c', dist.Uniform(0.9, 1.1))
@@ -124,17 +119,21 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
             params['GP_log_rho'] = numpyro.sample('GP_log_rho', dist.Uniform(jnp.log(0.007), jnp.log(0.3)))
 
-        # --- MODEL DISPATCH ---
-        # Direct dispatch via dictionary to avoid massive if-else chain
-        # Note: GP models have a different signature (params, t, error), while others have (params, t)
-        # We handle this by checking if it's a GP type.
-
-        if 'gp' in detrend_type: # This covers 'gp', 'linear+gp', etc.
-            if detrend_type == 'gp': gp_builder = build_gp
-            elif detrend_type == 'linear+gp': gp_builder = build_gp_linear
-            elif detrend_type == 'quadratic+gp': gp_builder = build_gp_quadratic
-            elif detrend_type == 'explinear+gp': gp_builder = build_gp_explinear
-            else: raise ValueError(f"Unknown GP detrend_type: {detrend_type}")
+        if 'gp' in detrend_type:
+            if detrend_type == 'gp':
+                gp_builder = build_gp
+            elif detrend_type == 'linear+gp':
+                gp_builder = build_gp_linear
+            elif detrend_type == 'quadratic+gp':
+                gp_builder = build_gp_quadratic
+            elif detrend_type == 'cubic+gp':
+                gp_builder = build_gp_cubic
+            elif detrend_type == 'quartic+gp':
+                gp_builder = build_gp_quartic
+            elif detrend_type == 'explinear+gp':
+                gp_builder = build_gp_explinear
+            else:
+                raise ValueError(f"Unknown GP detrend_type: {detrend_type}")
 
             gp = gp_builder(params, t, error)
             numpyro.sample('obs', gp.numpyro_dist(), obs=y)
@@ -154,18 +153,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
 
     compute_lc_kernel = COMPUTE_KERNELS[detrend_type]
-        # ---- Precompute constants ONCE ----
     if ld_profile == "power2":
-        POLY_DEGREE_LD = 12
-        MUS_LD = jnp.linspace(0.0, 1.0, 300, endpoint=True)
-        # Match calc_poly_coeffs behavior: sort mu
-
-        # Build X exactly like your function
-        X_LD = jnp.vander(1.0 - MUS_LD, N=POLY_DEGREE_LD + 1, increasing=True)[:, 1:]  # (Nmu, deg)
-
-        # Precompute the least-squares operator P = pinv(X)  (deg, Nmu)
-        # Use NumPy once; then convert to jnp so it can be used inside jitted code.
-        P_LD = jnp.asarray(np.linalg.pinv(np.asarray(X_LD)))
+        MUS_LD, P_LD = _prepare_power2_poly()
 
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                                mu_depths=None, PERIOD=None, trend_fixed=None,
@@ -193,35 +182,18 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             elif ld_profile == 'power2':
                 c1 = numpyro.sample('c1', dist.TruncatedNormal(mu_u_ld[:,0], 0.2, low=0.0, high=1.0))
                 c2 = numpyro.sample('c2', dist.TruncatedNormal(mu_u_ld[:,1], 0.2, low=0.001, high=1.0))
-                '''
-                def compute_one_lc_u(c1_val, c2_val):
-                    prof = get_I_power2(c1_val, c2_val, MUS)
-                    prof = prof[sort]
-                    return P @ (1.0 - prof)
-                    #power2_profile = get_I_power2(c1_val, c2_val, MUS)
-                    #return calc_poly_coeffs(MUS, power2_profile, poly_degree=POLY_DEGREE)
-                u_poly_all = jax.vmap(compute_one_lc_u)(c1, c2)
-                '''
-                    # Broadcast to (n_lc, Nmu)
-                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
-
-                # Batched LS projection: (deg, Nmu) @ (Nmu, n_lc) -> (deg, n_lc) -> transpose
-                u = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
-
-                #u = numpyro.deterministic('u', u_poly_all)
+                profs = get_I_power2(c1[:, None], c2[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
             else:
                 raise ValueError(f"Unknown ld_profile: {ld_profile}")
         elif ld_mode == 'fixed':
             if ld_profile == 'quadratic':
                 u = numpyro.deterministic('u', ld_fixed)
             elif ld_profile == 'power2':
-                POLY_DEGREE = 12
-                MUS = jnp.linspace(0.0, 1.00, 300, endpoint=True)
                 c1_mu = numpyro.deterministic('c1', ld_fixed[:, 0])
                 c2_mu = numpyro.deterministic('c2', ld_fixed[:, 1])
-                profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])  # (n_lc, Nmu)
-                u = (P_LD @ (1.0 - profs).T).T  # (n_lc, deg)
-                #u = numpyro.deterministic("u", u_poly_all)
+                profs = get_I_power2(c1_mu[:, None], c2_mu[:, None], MUS_LD[None, :])
+                u = (P_LD @ (1.0 - profs).T).T
         else:
             raise ValueError(f"Unknown ld_mode: {ld_mode}")
 
@@ -231,25 +203,29 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
         in_axes = {"period": None, "duration": None, "t0": None, "b": None, "rors": 0, "u": 0}
 
-        # --- STANDARD DETRENDING (SAMPLES v IF NOT 'none') ---
         if detrend_type != 'none':
             if trend_mode == 'free':
                 params['c'] = numpyro.sample('c', dist.Uniform(0.9, 1.1).expand([num_lcs]))
                 params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                 in_axes.update({'c': 0, 'v': 0})
 
-                if detrend_type == 'quadratic':
+                poly_order = 1
+                if 'quartic' in detrend_type:
+                    poly_order = 4
+                elif 'cubic' in detrend_type:
+                    poly_order = 3
+                elif 'quadratic' in detrend_type:
+                    poly_order = 2
+
+                if poly_order >= 2:
                     params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
                     in_axes.update({'v2': 0})
-                elif detrend_type == 'cubic':
-                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                if poly_order >= 3:
                     params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    in_axes.update({'v2': 0, 'v3': 0})
-                elif detrend_type == 'quartic':
-                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    in_axes.update({'v3': 0})
+                if poly_order >= 4:
                     params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
+                    in_axes.update({'v4': 0})
 
                 if detrend_type == 'linear_discontinuity':
                     params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1).expand([num_lcs]))
@@ -273,19 +249,24 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 params['v'] = numpyro.deterministic('v', trend_temp[:, 1])
                 in_axes.update({'c': 0, 'v': 0})
 
-                if detrend_type == 'quadratic':
+                poly_order = 1
+                if 'quartic' in detrend_type:
+                    poly_order = 4
+                elif 'cubic' in detrend_type:
+                    poly_order = 3
+                elif 'quadratic' in detrend_type:
+                    poly_order = 2
+
+                if poly_order >= 2:
                     params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
                     in_axes.update({'v2': 0})
-                elif detrend_type == 'cubic':
-                    params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
+                if poly_order >= 3:
                     params['v3'] = numpyro.deterministic('v3', trend_temp[:, 3])
-                    in_axes.update({'v2': 0, 'v3': 0})
-                elif detrend_type == 'quartic':
-                    params['v2'] = numpyro.deterministic('v2', trend_temp[:, 2])
-                    params['v3'] = numpyro.deterministic('v3', trend_temp[:, 3])
+                    in_axes.update({'v3': 0})
+                if poly_order >= 4:
                     params['v4'] = numpyro.deterministic('v4', trend_temp[:, 4])
-                    in_axes.update({'v2': 0, 'v3': 0, 'v4': 0})
-                elif detrend_type == 'linear_discontinuity':
+                    in_axes.update({'v4': 0})
+                if detrend_type == 'linear_discontinuity':
                     params['t_jump'] = numpyro.deterministic('t_jump', trend_temp[:, 2])
                     params['jump'] = numpyro.deterministic('jump', trend_temp[:, 3])
                     in_axes.update({'t_jump': 0, 'jump': 0})
@@ -301,26 +282,37 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
             else:
                 raise ValueError(f"Unknown trend_mode: {trend_mode}")
 
-        # Adjust vmap for multi-planet
         if 'gp_spectroscopic' in detrend_type:
             params['A_gp'] = numpyro.sample('A_gp', dist.Uniform(0.5, 2).expand([num_lcs]))
             in_axes['A_gp'] = 0
 
-            # --- FIX: Check if parameters already exist to avoid Duplication Error ---
-            if 'linear' in detrend_type:
-                if 'v' not in params:
-                    params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    in_axes['v'] = 0
-            if 'quadratic' in detrend_type:
-                if 'v2' not in params:
-                    params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    in_axes['v2'] = 0
-            if 'explinear' in detrend_type:
-                if 'A' not in params:
-                    params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
-                    log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)).expand([num_lcs]))
-                    params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
-                    in_axes.update({'A': 0, 'tau': 0})
+            if 'linear' in detrend_type and 'v' not in params:
+                params['v'] = numpyro.sample('v', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                in_axes['v'] = 0
+
+            poly_order = 1
+            if 'quartic' in detrend_type:
+                poly_order = 4
+            elif 'cubic' in detrend_type:
+                poly_order = 3
+            elif 'quadratic' in detrend_type:
+                poly_order = 2
+
+            if poly_order >= 2 and 'v2' not in params:
+                params['v2'] = numpyro.sample('v2', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                in_axes['v2'] = 0
+            if poly_order >= 3 and 'v3' not in params:
+                params['v3'] = numpyro.sample('v3', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                in_axes['v3'] = 0
+            if poly_order >= 4 and 'v4' not in params:
+                params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                in_axes['v4'] = 0
+
+            if 'explinear' in detrend_type and 'A' not in params:
+                params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                log_tau = numpyro.sample('log_tau', dist.Uniform(jnp.log(1e-3), jnp.log(1e-1)).expand([num_lcs]))
+                params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
+                in_axes.update({'A': 0, 'tau': 0})
 
             y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, gp_trend)
 
@@ -338,5 +330,3 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
     return _vectorized_model_static
-
-
