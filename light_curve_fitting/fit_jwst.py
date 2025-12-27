@@ -106,6 +106,14 @@ def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, s
         trend = trend + spot_trend
     return trend
 
+def _align_trend_to_time(trend, trend_time, target_time):
+    trend = np.asarray(trend)
+    target_time = np.asarray(target_time)
+    trend_time = np.asarray(trend_time)
+    if len(trend) == len(target_time):
+        return trend
+    return np.interp(target_time, trend_time, trend)
+
 def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method="weighted"):
     """
     Bin a time-series (or stack of time-series) onto a fixed cadence.
@@ -1176,6 +1184,8 @@ def main():
             wl_sigma = 1.4826 * jnp.nanmedian(np.abs(wl_residual - jnp.nanmedian(wl_residual)))
             wl_mad_mask = jnp.abs(wl_residual - jnp.nanmedian(wl_residual)) > whitelight_sigma * wl_sigma
             wl_sigma_post_clip = 1.4826 * jnp.nanmedian(jnp.abs(wl_residual[~wl_mad_mask] - jnp.nanmedian(wl_residual[~wl_mad_mask])))
+            spec_good_mask = (~wl_mad_mask if len(wl_mad_mask) == len(data.time)
+                              else np.ones(len(data.time), dtype=bool))
 
             plt.plot(data.wl_time, wl_transit_model, color="mediumorchid", lw=2, zorder=3)
             plt.scatter(data.wl_time, data.wl_flux, s=6, c='k', zorder=1, alpha=0.5)
@@ -1330,7 +1340,7 @@ def main():
 
             for idx_i, bin_idx in enumerate(hr_indices):
                 raw_flux_hr = data.flux_hr[bin_idx]
-                flux_hr_masked = raw_flux_hr[~wl_mad_mask]
+                flux_hr_masked = raw_flux_hr[spec_good_mask]
                 
                 baseline_norm = np.nanmedian(flux_hr_masked[:50])
                 norm_flux_hr = flux_hr_masked / baseline_norm
@@ -1487,6 +1497,10 @@ def main():
         RORS_BASE = bestfit_params_wl_df['rors'].values
         DEPTH_BASE = RORS_BASE**2
 
+    spec_good_mask = (~wl_mad_mask if len(wl_mad_mask) == len(data.time)
+                      else np.ones(len(data.time), dtype=bool))
+    wl_time_good = data.wl_time[~wl_mad_mask] if len(wl_mad_mask) == len(data.wl_time) else data.wl_time
+
     key_lr, key_hr, key_map_lr, key_mcmc_lr, key_map_hr, key_mcmc_hr, key_prior_pred = jax.random.split(key_master, 7)
     need_lowres_analysis = interpolate_trend or interpolate_ld or need_lowres
     
@@ -1497,14 +1511,17 @@ def main():
     spot_trend, jump_trend = None, None
     if need_lowres_analysis:
         print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
-        time_lr = jnp.array(data.time[~wl_mad_mask])
-        flux_lr = jnp.array(data.flux_lr[:, ~wl_mad_mask])
-        flux_err_lr = jnp.array(data.flux_err_lr[:, ~wl_mad_mask])
+        time_lr = jnp.array(data.time[spec_good_mask])
+        flux_lr = jnp.array(data.flux_lr[:, spec_good_mask])
+        flux_err_lr = jnp.array(data.flux_err_lr[:, spec_good_mask])
         num_lcs_lr = jnp.array(data.flux_err_lr.shape[0])
 
         if 'gp' in detrending_type:
             gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-            gp_trend = jnp.array(gp_df['gp_trend'].values)[~wl_mad_mask]
+            gp_trend_raw = gp_df['gp_trend'].values
+            if len(gp_trend_raw) == len(wl_mad_mask):
+                gp_trend_raw = gp_trend_raw[~wl_mad_mask]
+            gp_trend = jnp.array(_align_trend_to_time(gp_trend_raw, wl_time_good, np.array(time_lr)))
             
             detrend_type_multiwave = detrending_type.replace('gp', 'gp_spectroscopic')
         else:
@@ -1558,9 +1575,13 @@ def main():
             model_run_args_lr['gp_trend'] = gp_trend
             init_params_lr['A_gp'] = jnp.ones(num_lcs_lr)
         if 'spot_spectroscopic' in detrend_type_multiwave:
+            if spot_trend is not None and len(spot_trend) != len(time_lr):
+                spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_lr))
             model_run_args_lr['spot_trend'] = spot_trend
             init_params_lr['A_spot'] = jnp.ones(num_lcs_lr)
         if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+            if jump_trend is not None and len(jump_trend) != len(time_lr):
+                jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_lr))
             model_run_args_lr['jump_trend'] = jump_trend
             init_params_lr['A_jump'] = jnp.ones(num_lcs_lr)
 
@@ -1659,13 +1680,16 @@ def main():
         save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
     print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
-    time_hr = jnp.array(data.time[~wl_mad_mask])
-    flux_hr = jnp.array(data.flux_hr[:, ~wl_mad_mask])
-    flux_err_hr = jnp.array(data.flux_err_hr[:, ~wl_mad_mask])
+    time_hr = jnp.array(data.time[spec_good_mask])
+    flux_hr = jnp.array(data.flux_hr[:, spec_good_mask])
+    flux_err_hr = jnp.array(data.flux_err_hr[:, spec_good_mask])
 
     if 'gp' in detrending_type:
         gp_df = pd.read_csv(f'{output_dir}/{instrument_full_str}_whitelight_GP_database.csv')
-        gp_trend = jnp.array(gp_df['gp_trend'].values)[~wl_mad_mask]
+        gp_trend_raw = gp_df['gp_trend'].values
+        if len(gp_trend_raw) == len(wl_mad_mask):
+            gp_trend_raw = gp_trend_raw[~wl_mad_mask]
+        gp_trend = jnp.array(_align_trend_to_time(gp_trend_raw, wl_time_good, np.array(time_hr)))
         detrend_type_multiwave = detrending_type.replace('gp', 'gp_spectroscopic')
     else:
         detrend_type_multiwave = detrending_type
@@ -1739,9 +1763,13 @@ def main():
         model_run_args_hr['gp_trend'] = gp_trend
         init_params_hr['A_gp'] = jnp.ones(num_lcs_hr)
     if 'spot_spectroscopic' in detrend_type_multiwave:
+        if spot_trend is not None and len(spot_trend) != len(time_hr):
+            spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_hr))
         model_run_args_hr['spot_trend'] = spot_trend
         init_params_hr['A_spot'] = jnp.ones(num_lcs_hr)
     if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+        if jump_trend is not None and len(jump_trend) != len(time_hr):
+            jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_hr))
         model_run_args_hr['jump_trend'] = jump_trend
         init_params_hr['A_jump'] = jnp.ones(num_lcs_hr)
 
