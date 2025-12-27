@@ -47,6 +47,14 @@ from models.gp import (
 from models.builder import create_whitelight_model, create_vectorized_model, COMPUTE_KERNELS
 import numpy as np
 
+TREND_PARAMS = [
+    'c', 'v', 'v2', 'v3', 'v4', 
+    'A', 'tau', 
+    'spot_amp', 'spot_mu', 'spot_sigma', 
+    't_jump', 'jump', 
+    'A_gp', 'A_spot', 'A_jump'
+]
+
 def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method="weighted"):
     """
     Bin a time-series (or stack of time-series) onto a fixed cadence.
@@ -1734,34 +1742,15 @@ def main():
         else:
             map_params_lr['u'] = jnp.nanmedian(ld_u_lr, axis=0)
 
-        if detrend_type_multiwave != 'none':
-            map_params_lr['c'] = jnp.nanmedian(samples_lr["c"], axis=0)
-            if 'v' in samples_lr: 
-                map_params_lr['v'] = jnp.nanmedian(samples_lr["v"], axis=0)
-        if 'v2' in samples_lr:
-            map_params_lr['v2'] = jnp.nanmedian(samples_lr['v2'], axis=0)
-        if 'v3' in samples_lr:
-            map_params_lr['v3'] = jnp.nanmedian(samples_lr['v3'], axis=0)
-        if 'v4' in samples_lr:
-            map_params_lr['v4'] = jnp.nanmedian(samples_lr['v4'], axis=0)
-        if 'explinear' in detrend_type_multiwave:
-            map_params_lr['A'] = jnp.nanmedian(samples_lr['A'], axis=0)
-            map_params_lr['tau'] = jnp.nanmedian(samples_lr['tau'], axis=0)
-
+        map_params_lr.update({k: jnp.nanmedian(samples_lr[k], axis=0) for k in TREND_PARAMS if k in samples_lr})
 
         selected_kernel = COMPUTE_KERNELS[detrend_type_multiwave]
         in_axes_map = {'rors': 0, 'u': 0}
-        if detrend_type_multiwave != 'none':
-            in_axes_map['c'] = 0
-            if 'v' in samples_lr: in_axes_map['v'] = 0
-        if 'explinear' in detrend_type_multiwave:
-            in_axes_map.update({'A': 0, 'tau': 0})
+        in_axes_map.update({k: 0 for k in TREND_PARAMS if k in map_params_lr})
         
         final_in_axes = {k: in_axes_map.get(k, None) for k in map_params_lr.keys()}
 
         if 'gp_spectroscopic' in detrend_type_multiwave:
-            map_params_lr['A_gp'] = jnp.nanmedian(samples_lr['A_gp'], axis=0)
-            final_in_axes['A_gp'] = 0
             model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None))(map_params_lr, time_lr, gp_trend)
         else:
             model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None))(map_params_lr, time_lr)
@@ -1935,28 +1924,15 @@ def main():
             # Fallback if c1/c2 not found (should not happen for power2)
              if 'u' in samples_hr:
                  map_params_hr["u"] = jnp.nanmedian(np.array(samples_hr["u"]), axis=0)
-    if "c" in samples_hr: 
-        map_params_hr["c"] = jnp.nanmedian(samples_hr["c"], axis=0)
-    if "v" in samples_hr: 
-        map_params_hr["v"] = jnp.nanmedian(samples_hr["v"], axis=0)
-    if "v2" in samples_hr: 
-        map_params_hr["v2"] = jnp.nanmedian(samples_hr["v2"], axis=0)
-    if "v3" in samples_hr: 
-        map_params_hr["v3"] = jnp.nanmedian(samples_hr["v3"], axis=0)
-    if "v4" in samples_hr: 
-        map_params_hr["v4"] = jnp.nanmedian(samples_hr["v4"], axis=0)
+    map_params_hr.update({k: jnp.nanmedian(samples_hr[k], axis=0) for k in TREND_PARAMS if k in samples_hr})
 
     in_axes_map_hr = {"rors": 0, "u": 0}
-    if detrend_type_multiwave != 'none':
-        in_axes_map_hr.update({"c": 0})
-        if "v" in samples_hr: in_axes_map_hr.update({"v": 0})
+    in_axes_map_hr.update({k: 0 for k in TREND_PARAMS if k in map_params_hr})
     
     final_in_axes_hr = {k: in_axes_map_hr.get(k, None) for k in map_params_hr.keys()}
     selected_kernel_hr = COMPUTE_KERNELS[detrend_type_multiwave]
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
-        map_params_hr['A_gp'] = jnp.nanmedian(samples_hr['A_gp'], axis=0)
-        final_in_axes_hr['A_gp'] = 0
         model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None))(map_params_hr, time_hr, gp_trend)
     else:
         model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None))(map_params_hr, time_hr)
