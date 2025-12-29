@@ -1,45 +1,53 @@
-# Auto-generated config for HAT-P-18
-# Transit time (t0) automatically assigned: 60795.39
-
 planet:
-  name: HAT-P-18
-  period: 5.50802941
-  duration: 0.10999997916666666
-  t0: 60795.39
-  b: 0.148
-  rprs: 0.1356
+  name: WASP-39 # Naming convention for planet name in files
+  period: 4.0552842 # Orbital period [days]
+  duration: 0.11693087083333333 # Transit Duration [days]
+  t0: 59770.835 # Transit Time in data [exotedrf timestamp [bjd-2450000.5?]
+  b: 0.4498 # Impact parameter
+  rprs: 0.1457 # Planet-to-star radius ratio
 
 stellar:
-  feh: 0.10
-  teff: 4803.0
-  logg: 4.57
+  feh: -0.03 
+  teff: 5400.0
+  logg: 4.39
   ld_model: "stagger"
   ld_data_path: "../exotic_ld_data"
 
-instrument: 'NIRSPEC/G395M'
-order: 1
+instrument: 'NIRSPEC/PRISM'
+order: #
 nrs: 1
-path: '<directory>'
-input_dir: 'FITS'
-output_dir: '<output>'
-fits_file: '<fits_file>'
-resolution:
-  high: 'reference'
-  low: 20
-  reference_grid: 'prism_template.csv'
-flags:
-  detrending_type: 'explinear'
-  interpolate_trend: False
-  interpolate_ld: False
-  fix_ld: False
-  need_lowres: True
-  mask_start: jnp.min(t)
-  mask_end: jnp.min(t) + 0.020833
-  mask_integrations_start: None
-  #mask_integrations_end:
-  ld_profile: 'power2'
-outlier_clip:
-  whitelight_sigma: 4
-  spectroscopic_sigma: 4
+wavelength_filter:
+  wl_min: 2.0 # Cut to earliest wavelength
+  wl_max: 5.0 # Cut to latest wavelength 
+path: './' # Path to parent directory 
+input_dir: 'FITS' # path to directory with fits file [eg. Path + input_dir / 'fits']
+fits_file: 'WASP-39_nrs1_box_spectra_fullres_PRISM.fits' # fits file name 
+output_dir: 'WASP-39-PRISM' # Output directory 
 
-host_device: "cpu"
+resolution: #  one of 'resolution' or 'pixels'
+  high: 'native' # Native for native , int elsewise
+  low: 20
+
+flags:
+  detrending_type: 'explinear' # detrending style [linear, explinear, spot, gp, linear_discontinuity]
+  interpolate_trend: False  # interpolate low-res trend coeffs to high-res
+  interpolate_ld: False # interpolate low-res LD coeffs to high-res
+  fix_ld: False # Fix LD coeffs to empirical values
+  need_lowres: True # Run low-res analysis too
+  ld_profile: 'power2' # quadratic or power2
+  #mask_start: 59770.974816 # time mask start, accepts array strings ['start1', 'start2']
+  #mask_end: 59770.9751014 # time mask end , accepts array strings ['end1', 'end2']
+  #mask_integrations_start: # integration cut 
+  #mask_integrations_end: # Integration cut
+time_binning: # if wanting to bin down light curve
+  enabled: True
+  dt_seconds: 20 # time binning cadence [seconds]
+  method: 'mean' # mean or weighted (probably same thing given pipeline error)
+  whitelight: True # bin whitelight
+  spectroscopic: True # bin spectroscopic 
+
+outlier_clip: # outlier clipping
+  whitelight_sigma: 4 # clip whitelight outliers to X sigma
+  spectroscopic_sigma: 4 # clip individual spectroscopic channels to X sigma and reject that time in all other channels
+
+host_device: "gpu" # options are gpu, cpu
