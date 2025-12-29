@@ -114,6 +114,17 @@ def _align_trend_to_time(trend, trend_time, target_time):
         return trend
     return np.interp(target_time, trend_time, trend)
 
+def _spectro_detrend_type(detrending_type):
+    """Map WL detrending type to spectroscopic equivalent where applicable."""
+    detrend_type = detrending_type
+    if 'gp' in detrend_type and 'gp_spectroscopic' not in detrend_type:
+        detrend_type = detrend_type.replace('gp', 'gp_spectroscopic')
+    if 'linear_discontinuity' in detrend_type and 'linear_discontinuity_spectroscopic' not in detrend_type:
+        detrend_type = detrend_type.replace('linear_discontinuity', 'linear_discontinuity_spectroscopic')
+    if 'spot' in detrend_type and 'spot_spectroscopic' not in detrend_type:
+        detrend_type = detrend_type.replace('spot', 'spot_spectroscopic')
+    return detrend_type
+
 def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method="weighted"):
     """
     Bin a time-series (or stack of time-series) onto a fixed cadence.
@@ -194,7 +205,9 @@ def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method
     keep = counts > 0
 
     t_sum = np.bincount(idx_v, weights=time_v, minlength=nbins)
-    t_b = (t_sum / counts)[keep]
+    t_b_full = np.full(nbins, np.nan)
+    t_b_full[keep] = t_sum[keep] / counts[keep]
+    t_b = t_b_full[keep]
     counts_b = counts[keep]
 
     def _bin_1d(y1, e1):
@@ -202,16 +215,22 @@ def _bin_time_series_numpy(time, y, yerr=None, dt_seconds=120.0, t0=None, method
             w = 1.0 / (e1 * e1)
             wsum = np.bincount(idx_v, weights=w, minlength=nbins)
             ysum = np.bincount(idx_v, weights=w * y1, minlength=nbins)
-            yb = (ysum / wsum)[keep]
-            eb = np.sqrt(1.0 / wsum)[keep]
+            yb_full = np.full(nbins, np.nan)
+            eb_full = np.full(nbins, np.nan)
+            yb_full[keep] = ysum[keep] / wsum[keep]
+            eb_full[keep] = np.sqrt(1.0 / wsum[keep])
+            yb = yb_full[keep]
+            eb = eb_full[keep]
             return yb, eb
         else:
             ysum = np.bincount(idx_v, weights=y1, minlength=nbins)
-            yb = (ysum / counts)[keep]
+            yb_full = np.full(nbins, np.nan)
+            yb_full[keep] = ysum[keep] / counts[keep]
+            yb = yb_full[keep]
             if e1 is None:
                 return yb, None
             esum2 = np.bincount(idx_v, weights=e1 * e1, minlength=nbins)
-            eb = np.sqrt(esum2) / counts_b
+            eb = np.sqrt(esum2[keep]) / counts_b
             return yb, eb
 
     if y.ndim == 1:
@@ -1332,8 +1351,8 @@ def main():
             elif est_depth < 1e-3: offset_step = 0.0075
             else: offset_step = 0.02
 
-            wl_model_vector = np.array(transit_only_model)
-            wl_time_vector = np.array(t_masked)
+            wl_time_vector = np.array(data.time[spec_good_mask])
+            wl_model_vector = np.array(compute_transit_model(bestfit_params_wl, jnp.array(wl_time_vector)) + 1.0)
             time_center = np.median(wl_time_vector)
 
             res_zoom_factor = 2.0 
@@ -1522,16 +1541,14 @@ def main():
             if len(gp_trend_raw) == len(wl_mad_mask):
                 gp_trend_raw = gp_trend_raw[~wl_mad_mask]
             gp_trend = jnp.array(_align_trend_to_time(gp_trend_raw, wl_time_good, np.array(time_lr)))
-            
-            detrend_type_multiwave = detrending_type.replace('gp', 'gp_spectroscopic')
         else:
-            detrend_type_multiwave = detrending_type
             gp_trend = None
+        detrend_type_multiwave = _spectro_detrend_type(detrending_type)
 
         print(f"Low-res: {num_lcs_lr} light curves.")
         DEPTHS_BASE_LR = jnp.tile(DEPTH_BASE, (num_lcs_lr, 1))
 
-        if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS']:
+        if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H', 'MIRI/LRS']:
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr , instrument, ld_profile=ld_profile)
         elif instrument == 'NIRISS/SOSS':
             U_mu_lr = get_limb_darkening(sld, data.wavelengths_lr, data.wavelengths_err_lr, instrument, order=order, ld_profile=ld_profile)
@@ -1580,6 +1597,8 @@ def main():
             model_run_args_lr['spot_trend'] = spot_trend
             init_params_lr['A_spot'] = jnp.ones(num_lcs_lr)
         if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+            if jump_trend is None:
+                raise ValueError("linear_discontinuity_spectroscopic requires WL linear_discontinuity to build jump_trend.")
             if jump_trend is not None and len(jump_trend) != len(time_lr):
                 jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_lr))
             model_run_args_lr['jump_trend'] = jump_trend
@@ -1648,7 +1667,7 @@ def main():
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
-                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend)
+                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, jump_trend=jump_trend)
 
         poly_orders = [1, 2, 3, 4]
         wl_lr = np.array(data.wavelengths_lr)
@@ -1690,10 +1709,9 @@ def main():
         if len(gp_trend_raw) == len(wl_mad_mask):
             gp_trend_raw = gp_trend_raw[~wl_mad_mask]
         gp_trend = jnp.array(_align_trend_to_time(gp_trend_raw, wl_time_good, np.array(time_hr)))
-        detrend_type_multiwave = detrending_type.replace('gp', 'gp_spectroscopic')
     else:
-        detrend_type_multiwave = detrending_type
         gp_trend = None
+    detrend_type_multiwave = _spectro_detrend_type(detrending_type)
 
     if need_lowres_analysis:
         time_hr = time_hr[valid]
@@ -1725,7 +1743,7 @@ def main():
             
         model_run_args_hr['ld_interpolated'] = ld_interpolated_hr
     elif hr_ld_mode == 'fixed' or hr_ld_mode == 'free':
-        if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'MIRI/LRS']:
+        if instrument in ['NIRSPEC/G395H', 'NIRSPEC/G395M', 'NIRSPEC/PRISM', 'NIRSPEC/G140H', 'NIRSPEC/G235H', 'MIRI/LRS']:
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, ld_profile=ld_profile)
         elif instrument == 'NIRISS/SOSS':
             U_mu_hr_init = get_limb_darkening(sld, wl_hr, data.wavelengths_err_hr, instrument, order=order, ld_profile=ld_profile)
@@ -1768,6 +1786,8 @@ def main():
         model_run_args_hr['spot_trend'] = spot_trend
         init_params_hr['A_spot'] = jnp.ones(num_lcs_hr)
     if 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
+        if jump_trend is None:
+            raise ValueError("linear_discontinuity_spectroscopic requires WL linear_discontinuity to build jump_trend.")
         if jump_trend is not None and len(jump_trend) != len(time_hr):
             jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_hr))
         model_run_args_hr['jump_trend'] = jump_trend
@@ -1810,7 +1830,7 @@ def main():
     plot_wavelength_offset_summary(time_hr, flux_hr, median_total_error_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
-                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend)
+                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend, jump_trend=jump_trend)
 
     plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, data.wavelengths_err_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
@@ -1820,3 +1840,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
