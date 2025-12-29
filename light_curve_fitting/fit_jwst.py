@@ -1528,6 +1528,19 @@ def main():
     best_poly_coeffs_c, best_poly_coeffs_v = None, None
     best_poly_coeffs_u1, best_poly_coeffs_u2 = None, None
     spot_trend, jump_trend = None, None
+    if 'spot' in detrending_type:
+        if {'spot_amp', 'spot_mu', 'spot_sigma'}.issubset(bestfit_params_wl_df.columns):
+            spot_amp = bestfit_params_wl_df['spot_amp'].values[0]
+            spot_mu = bestfit_params_wl_df['spot_mu'].values[0]
+            spot_sigma = bestfit_params_wl_df['spot_sigma'].values[0]
+            if not np.isnan(spot_amp) and not np.isnan(spot_mu) and not np.isnan(spot_sigma):
+                spot_trend = spot_crossing(wl_time_good, spot_amp, spot_mu, spot_sigma)
+    if 'linear_discontinuity' in detrending_type:
+        if {'t_jump', 'jump'}.issubset(bestfit_params_wl_df.columns):
+            t_jump = bestfit_params_wl_df['t_jump'].values[0]
+            jump = bestfit_params_wl_df['jump'].values[0]
+            if not np.isnan(t_jump) and not np.isnan(jump):
+                jump_trend = jnp.where(wl_time_good > t_jump, jump, 0.0)
     if need_lowres_analysis:
         print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
         time_lr = jnp.array(data.time[spec_good_mask])
@@ -1840,4 +1853,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
