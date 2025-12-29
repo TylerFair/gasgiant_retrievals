@@ -313,6 +313,10 @@ def plot_wavelength_offset_summary(
                 t_shift = t - np.min(t)
                 if detrend_type == 'linear':
                     trend = c_i + v_i * t_shift
+                elif detrend_type == 'linear_discontinuity':
+                    t_jump_i = map_params['t_jump'][idx]
+                    jump_i = map_params['jump'][idx]
+                    trend = c_i + v_i * t_shift + np.where(t > t_jump_i, jump_i, 0.0)
                 elif detrend_type == 'explinear':
                     A_i = map_params['A'][idx]; tau_i = map_params['tau'][idx]
                     trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
