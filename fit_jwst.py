@@ -428,6 +428,34 @@ def get_samples(model, key, t, yerr, indiv_y, init_params, **model_kwargs):
     mcmc.run(key, t, yerr, y=indiv_y, **model_kwargs)
     return mcmc.get_samples()
 
+def _slice_by_channel(value, sl, num_lcs):
+    if value is None:
+        return None
+    if isinstance(value, (np.ndarray, jnp.ndarray)) and value.ndim > 0 and value.shape[0] == num_lcs:
+        return value[sl]
+    return value
+
+def get_samples_chunked(model, key, t, yerr, indiv_y, init_params, chunk_size, **model_kwargs):
+    num_lcs = indiv_y.shape[0]
+    print(f"Running chunked MCMC: {num_lcs} channels in blocks of {chunk_size}")
+    samples_chunks = []
+    for start in range(0, num_lcs, chunk_size):
+        end = min(start + chunk_size, num_lcs)
+        sl = slice(start, end)
+        key, key_chunk = jax.random.split(key)
+        init_chunk = {k: _slice_by_channel(v, sl, num_lcs) for k, v in init_params.items()}
+        kwargs_chunk = {k: _slice_by_channel(v, sl, num_lcs) for k, v in model_kwargs.items()}
+        yerr_chunk = yerr[sl]
+        y_chunk = indiv_y[sl]
+        print(f"  chunk {start}:{end} ({end - start} channels)")
+        samples_chunk = get_samples(model, key_chunk, t, yerr_chunk, y_chunk, init_chunk, **kwargs_chunk)
+        samples_chunks.append(jax.device_get(samples_chunk))
+    samples = {}
+    for key in samples_chunks[0].keys():
+        arrays = [chunk[key] for chunk in samples_chunks]
+        samples[key] = np.concatenate(arrays, axis=1)
+    return samples
+
 def compute_aic(n, residuals, k):
     rss = np.sum(np.square(residuals))
     rss = rss if rss > 1e-10 else 1e-10
@@ -799,9 +827,12 @@ def main():
     spot_mu = flags.get('spot_center', 0.0)
     spot_sigma = flags.get('spot_width', 0.0)
     save_trace = flags.get('save_whitelight_trace', False)
-    vmap_chunk_size = flags.get('vmap_chunk_size', None)
-    if vmap_chunk_size is not None:
-        vmap_chunk_size = int(vmap_chunk_size)
+    vmap_chunk = flags.get('vmap_chunk', False)
+    vmap_chunk_size = None
+    if isinstance(vmap_chunk, (int, float)) and not isinstance(vmap_chunk, bool):
+        vmap_chunk_size = int(vmap_chunk)
+    elif vmap_chunk is True:
+        vmap_chunk_size = 50
 
     ld_profile = flags.get('ld_profile', 'quadratic')
 
@@ -1541,7 +1572,32 @@ def main():
             jump = bestfit_params_wl_df['jump'].values[0]
             if not np.isnan(t_jump) and not np.isnan(jump):
                 jump_trend = jnp.where(wl_time_good > t_jump, jump, 0.0)
-    if need_lowres_analysis:
+    valid = None
+    lr_mask_path = f"{output_dir}/{instrument_full_str}_{lr_bin_str}_spectroscopic_outlier_mask.npy"
+    lr_params_path = f"{output_dir}/{instrument_full_str}_{lr_bin_str}_bestfit_params.csv"
+    poly_coeffs_path = f"{output_dir}/{instrument_full_str}_{lr_bin_str}_poly_coeffs.npz"
+    if os.path.exists(lr_mask_path) and os.path.exists(lr_params_path):
+        if interpolate_trend or interpolate_ld:
+            if os.path.exists(poly_coeffs_path):
+                print(f"Reusing low-res results and polynomial fits from {lr_bin_str}; skipping low-res fit.")
+                time_mask = np.load(lr_mask_path)
+                valid = ~time_mask
+                poly_data = np.load(poly_coeffs_path)
+                if interpolate_trend:
+                    best_poly_coeffs_c = poly_data["coeffs_c"]
+                    if "coeffs_v" in poly_data:
+                        best_poly_coeffs_v = poly_data["coeffs_v"]
+                if interpolate_ld:
+                    best_poly_coeffs_u1 = poly_data["coeffs_u1"]
+                    best_poly_coeffs_u2 = poly_data["coeffs_u2"]
+            else:
+                print("Low-res files found, but polynomial fits are missing; running low-res to build polynomials.")
+        else:
+            print(f"Reusing low-res results from {lr_bin_str}; skipping low-res fit.")
+            time_mask = np.load(lr_mask_path)
+            valid = ~time_mask
+
+    if need_lowres_analysis and valid is None:
         print(f"\n--- Running Low-Resolution Analysis (Binned to {lr_bin_str}) ---")
         time_lr = jnp.array(data.time[spec_good_mask])
         flux_lr = jnp.array(data.flux_lr[:, spec_good_mask])
@@ -1587,8 +1643,7 @@ def main():
             ld_mode=lr_ld_mode,
             trend_mode=lr_trend_mode,
             n_planets=n_planets,
-            ld_profile=ld_profile,
-            vmap_chunk_size=vmap_chunk_size
+            ld_profile=ld_profile
         )
 
         model_run_args_lr = {
@@ -1673,6 +1728,7 @@ def main():
         point_mask = np.abs(residuals - medians) > spectroscopic_sigma * sigmas
         time_mask = np.any(point_mask, axis=0)
         valid = ~time_mask
+        np.save(lr_mask_path, time_mask)
         time_lr = time_lr[valid]
         flux_lr = flux_lr[:, valid]
         flux_err_lr = flux_err_lr[:, valid]
@@ -1712,6 +1768,18 @@ def main():
                 plot_poly_fit(wl_lr, ld_u_lr[:, :, 0], best_poly_coeffs_u1, best_order_u1, "Wavelength", "u1", "Limb Darkening u1", f"{output_dir}/2opt_u1.png")
                 plot_poly_fit(wl_lr, ld_u_lr[:, :, 1], best_poly_coeffs_u2, best_order_u2, "Wavelength", "u2", "Limb Darkening u2", f"{output_dir}/2opt_u2.png")
 
+        poly_save = {}
+        if best_poly_coeffs_c is not None:
+            poly_save["coeffs_c"] = best_poly_coeffs_c
+        if best_poly_coeffs_v is not None:
+            poly_save["coeffs_v"] = best_poly_coeffs_v
+        if best_poly_coeffs_u1 is not None:
+            poly_save["coeffs_u1"] = best_poly_coeffs_u1
+        if best_poly_coeffs_u2 is not None:
+            poly_save["coeffs_u2"] = best_poly_coeffs_u2
+        if poly_save:
+            np.savez(poly_coeffs_path, **poly_save)
+
         plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, data.wavelengths_err_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
         save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
@@ -1731,7 +1799,7 @@ def main():
         gp_trend = None
     detrend_type_multiwave = _spectro_detrend_type(detrending_type)
 
-    if need_lowres_analysis:
+    if valid is not None:
         time_hr = time_hr[valid]
         flux_hr = flux_hr[:, valid]
         flux_err_hr = flux_err_hr[:, valid]
@@ -1792,8 +1860,7 @@ def main():
         ld_mode=hr_ld_mode,
         trend_mode=hr_trend_mode,
         n_planets=n_planets,
-        ld_profile=ld_profile,
-        vmap_chunk_size=vmap_chunk_size
+        ld_profile=ld_profile
     )
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
@@ -1812,7 +1879,19 @@ def main():
         model_run_args_hr['jump_trend'] = jump_trend
         init_params_hr['A_jump'] = jnp.ones(num_lcs_hr)
 
-    samples_hr = get_samples(hr_model_for_run, key_mcmc_hr, time_hr, flux_err_hr, flux_hr, init_params_hr, **model_run_args_hr)
+    if vmap_chunk_size is None:
+        samples_hr = get_samples(hr_model_for_run, key_mcmc_hr, time_hr, flux_err_hr, flux_hr, init_params_hr, **model_run_args_hr)
+    else:
+        samples_hr = get_samples_chunked(
+            hr_model_for_run,
+            key_mcmc_hr,
+            time_hr,
+            flux_err_hr,
+            flux_hr,
+            init_params_hr,
+            vmap_chunk_size,
+            **model_run_args_hr
+        )
 
     map_params_hr = {
         "duration": DURATION_BASE, "t0": T0_BASE, "b": B_BASE,
