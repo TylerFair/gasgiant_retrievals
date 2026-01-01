@@ -146,7 +146,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
 
     return _whitelight_model_static
 
-def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1, ld_profile='quadratic', vmap_chunk_size=None):
+def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='free', n_planets=1, ld_profile='quadratic'):
     print(f"Building vectorized model with: detrend='{detrend_type}', ld='{ld_mode}', trend='{trend_mode}' for {n_planets} planets")
 
     if detrend_type not in COMPUTE_KERNELS:
@@ -155,32 +155,6 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
     compute_lc_kernel = COMPUTE_KERNELS[detrend_type]
     if ld_profile == "power2":
         MUS_LD, P_LD = _prepare_power2_poly()
-
-    def _vmap_in_chunks(params, t, in_axes, extra=None):
-        if vmap_chunk_size is None:
-            if extra is None:
-                return jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-            return jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, extra)
-
-        num_lcs = params["rors"].shape[0]
-        if num_lcs <= vmap_chunk_size:
-            if extra is None:
-                return jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
-            return jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, extra)
-
-        ys = []
-        for start in range(0, num_lcs, vmap_chunk_size):
-            end = min(start + vmap_chunk_size, num_lcs)
-            params_chunk = {}
-            for key, value in params.items():
-                ax = in_axes.get(key, None)
-                params_chunk[key] = value[start:end] if ax == 0 else value
-            if extra is None:
-                y_chunk = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params_chunk, t)
-            else:
-                y_chunk = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params_chunk, t, extra)
-            ys.append(y_chunk)
-        return jnp.concatenate(ys, axis=0)
 
     def _vectorized_model_static(t, yerr, y=None, mu_duration=None, mu_t0=None, mu_b=None,
                                mu_depths=None, PERIOD=None, trend_fixed=None,
@@ -340,18 +314,18 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                 params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
                 in_axes.update({'A': 0, 'tau': 0})
 
-            y_model = _vmap_in_chunks(params, t, in_axes, extra=gp_trend)
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, gp_trend)
 
         elif detrend_type == 'spot_spectroscopic':
             params['A_spot'] = numpyro.sample('A_spot', dist.Uniform(0.5, 2).expand([num_lcs]))
             in_axes['A_spot'] = 0
-            y_model = _vmap_in_chunks(params, t, in_axes, extra=spot_trend)
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, spot_trend)
         elif detrend_type == 'linear_discontinuity_spectroscopic':
             params['A_jump'] = numpyro.sample('A_jump', dist.Uniform(0.5, 2).expand([num_lcs]))
             in_axes['A_jump'] = 0
-            y_model = _vmap_in_chunks(params, t, in_axes, extra=jump_trend)
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None, None))(params, t, jump_trend)
         else:
-            y_model = _vmap_in_chunks(params, t, in_axes)
+            y_model = jax.vmap(compute_lc_kernel, in_axes=(in_axes, None))(params, t)
 
         numpyro.sample('obs', dist.Normal(y_model, error_broadcast), obs=y)
 
