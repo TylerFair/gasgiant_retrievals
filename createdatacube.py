@@ -470,19 +470,18 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wavelengths = np.array(wavelengths)
     wavelengths_err = np.array(wavelengths_err)
     time = np.array(time)
-    flux_unbinned = np.array(flux_unbinned)  # Shape: (n_time, n_wavelength)
+    flux_unbinned = np.array(flux_unbinned)  # shape: (n_time, n_wavelength)
     flux_err_unbinned = np.array(flux_err_unbinned) 
-    # Remove NaN columns
+
     nanmask = np.all(np.isnan(flux_unbinned), axis=0)
     wavelengths, wavelengths_err = wavelengths[~nanmask], wavelengths_err[~nanmask]
     flux_unbinned, flux_err_unbinned = flux_unbinned[:, ~nanmask], flux_err_unbinned[:, ~nanmask]
 
-    # Apply time masking criteria (useful for spot-crossings) and optional "cut" directives.
-    #
-    # Supported inputs:
-    # - mask_start/mask_end can be scalars, strings (expressions), or same-length lists.
+    # time masking supported inputs
+  #
+    # - mask_start/mask_end can be scalars, strings, or  lists.
     # - None values are treated as open-ended (min(time) or max(time)).
-    # - Special directive "cut_phase_to_transit": keep only t0 ± 3 hours.
+    # - Special directive "cut_phase_to_transit": keep only t0 +- 3 hours.
 
     def evaluate_mask_value(value, time):
         """Evaluate a mask value that could be a number, None, or a string expression."""
@@ -490,7 +489,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
             return None
         if isinstance(value, str):
             v = value.strip()
-            # Do not eval special directives
             if v == "cut_phase_to_transit":
                 return v
             namespace = {
@@ -532,7 +530,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
 
     pairs = _to_pairs(mask_start, mask_end)
 
-    # 1) Handle "cut_phase_to_transit": keep only t0 +/- 3 hours (3/24 days)
+    # 1) Handle "cut_phase_to_transit": keep only t0 +- 3 hours (3/24 days)
     has_cut = any(
         (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
         (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
@@ -542,7 +540,7 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     if has_cut:
         # Use prior t0(s) from config
         prior_t0s = np.atleast_1d(cfg['planet']['t0']).astype(float)
-        window = 3.0 / 24.0  # 3 hours in days
+        window = 3.0 / 24.0 
 
         keep = np.zeros_like(time, dtype=bool)
         for t0 in prior_t0s:
