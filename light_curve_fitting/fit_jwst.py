@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import csv
 from functools import partial
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -266,6 +267,32 @@ def bin_spectrodata_in_time(data, dt_seconds=120.0, method="weighted", bin_white
     n0_wl = len(data.wl_time)
     n0_spec = len(data.time)
 
+    def _timebin_debug(label, time, wl_time, flux_lr, flux_hr, wl_flux):
+        def _summarize_time(t):
+            if t is None or len(t) == 0:
+                return "n=0"
+            dt_med = np.nanmedian(np.diff(t)) if len(t) > 1 else np.nan
+            return f"n={len(t)}, range=[{np.nanmin(t):.6f}, {np.nanmax(t):.6f}], dt_med={dt_med:.6e}"
+
+        def _shape_or_none(arr):
+            return None if arr is None else arr.shape
+
+        def _nan_count(arr):
+            return None if arr is None else int(np.isnan(arr).sum())
+
+        print(f"=== TIME BINNING DEBUG ({label}) ===")
+        print(f"wl_time: {_summarize_time(wl_time)}")
+        print(f"time: {_summarize_time(time)}")
+        print(f"wl_flux shape: {_shape_or_none(wl_flux)} nan_count: {_nan_count(wl_flux)}")
+        print(f"flux_lr shape: {_shape_or_none(flux_lr)} nan_count: {_nan_count(flux_lr)}")
+        print(f"flux_hr shape: {_shape_or_none(flux_hr)} nan_count: {_nan_count(flux_hr)}")
+        if flux_lr is not None:
+            print(f"n_channels_lr: {flux_lr.shape[0]}")
+        if flux_hr is not None:
+            print(f"n_channels_hr: {flux_hr.shape[0]}")
+
+    _timebin_debug("pre", data.time, data.wl_time, data.flux_lr, data.flux_hr, data.wl_flux)
+
     t_b_wl = data.wl_time
     if bin_whitelight:
         t_b_wl, wl_b, wlerr_b, _ = _bin_time_series_numpy(
@@ -296,6 +323,7 @@ def bin_spectrodata_in_time(data, dt_seconds=120.0, method="weighted", bin_white
         print(f"[time_binning wl] {n0_wl} -> {len(data.wl_time)} points (dt={dt_seconds:.1f}s, method={method})")
     if bin_spectroscopic:
         print(f"[time_binning spec] {n0_spec} -> {len(data.time)} points (dt={dt_seconds:.1f}s, method={method})")
+    _timebin_debug("post", data.time, data.wl_time, data.flux_lr, data.flux_hr, data.wl_flux)
     return data
 
 DTYPE = jnp.float64
@@ -623,65 +651,34 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
     params_df = pd.DataFrame(param_rows)
     params_df.to_csv(f"{output_prefix}_bestfit_params.csv", index=False)
 
-    lc_components = []
+    time = np.asarray(time)
+    flux = np.asarray(flux)
+    flux_err = np.asarray(flux_err)
+    wavelengths = np.asarray(wavelengths)
+    wavelengths_err = np.asarray(wavelengths_err)
+
+    meta_path = f"{output_prefix}_wavelengths.csv"
+    meta_df = pd.DataFrame({
+        "wavelength_center": wavelengths,
+        "wavelength_err": wavelengths_err,
+    })
+    meta_df.to_csv(meta_path, index=False)
+
+    wide_path = f"{output_prefix}_lightcurves_wide.csv"
+    columns = ["time"]
+    data_cols = [time]
     for i in range(n_wavelengths):
-        rors_i_all_planets = np.atleast_1d(map_params['rors'][i])
-        u_i = np.asarray(map_params['u'][i])
-        total_model_flux = np.zeros_like(time)
-        periods = np.atleast_1d(transit_params["period"])
-        durations = np.atleast_1d(map_params["duration"])
-        bs = np.atleast_1d(map_params["b"])
-        t0s = np.atleast_1d(map_params["t0"])
-        num_planets = len(periods)
+        columns.append(f"flux_{i:03d}")
+        columns.append(f"flux_err_{i:03d}")
+        data_cols.append(flux[i])
+        data_cols.append(flux_err[i])
 
-        params_for_transit = {
-            'period': periods,
-            'duration': durations,
-            't0': t0s,
-            'b': bs,
-            'rors': rors_i_all_planets,
-            'u': u_i
-        }
-        params_for_transit = jax.tree_util.tree_map(jnp.array, params_for_transit)
-        transit_model = compute_transit_model(params_for_transit, jnp.array(time))
-        transit_model = np.array(transit_model)
-
-        trend = _trend_from_params_np(
-            detrend_type,
-            time,
-            map_params,
-            idx=i,
-            gp_trend=gp_trend,
-            spot_trend=spot_trend,
-            jump_trend=jump_trend
-        )
-        
-        full_model = transit_model + trend
-        detrended_flux = flux[i] - trend
-
-        if total_error_fit is not None:
-            total_error_fit_broadcast = np.broadcast_to(total_error_fit[:, np.newaxis], (n_wavelengths, n_times))
-        else:
-            total_error_fit_broadcast = flux_err
-
-        for j in range(n_times):
-            lc_components.append({
-                'wavelength': wavelengths[i],
-                'wavelength_err': wavelengths_err[i],
-                'time': time[j],
-                'flux_raw': flux[i, j],
-                'flux_err_raw': flux_err[i, j],
-                'flux_err_fit': total_error_fit_broadcast[i, j],
-                'transit_model': transit_model[j],
-                'trend': trend[j],
-                'full_model': full_model[j],
-                'detrended_flux': detrended_flux[j],
-                'residual': flux[i, j] - full_model[j]
-            })
-
-    lc_df = pd.DataFrame(lc_components)
-    lc_df.to_csv(f"{output_prefix}_lightcurves.csv", index=False)
-    return params_df, lc_df
+    wide_data = np.column_stack(data_cols)
+    wide_df = pd.DataFrame(wide_data, columns=columns)
+    wide_df.to_csv(wide_path, index=False)
+    print(f"Saved wavelength metadata to {meta_path}")
+    print(f"Saved wide light curves to {wide_path}")
+    return params_df, None
 
 def get_robust_sigma(x):
     """Helper to calculate sigma using MAD (robust to outliers)."""
@@ -802,6 +799,9 @@ def main():
     spot_mu = flags.get('spot_center', 0.0)
     spot_sigma = flags.get('spot_width', 0.0)
     save_trace = flags.get('save_whitelight_trace', False)
+    vmap_chunk_size = flags.get('vmap_chunk_size', None)
+    if vmap_chunk_size is not None:
+        vmap_chunk_size = int(vmap_chunk_size)
 
     ld_profile = flags.get('ld_profile', 'quadratic')
 
@@ -1587,7 +1587,8 @@ def main():
             ld_mode=lr_ld_mode,
             trend_mode=lr_trend_mode,
             n_planets=n_planets,
-            ld_profile=ld_profile
+            ld_profile=ld_profile,
+            vmap_chunk_size=vmap_chunk_size
         )
 
         model_run_args_lr = {
@@ -1791,7 +1792,8 @@ def main():
         ld_mode=hr_ld_mode,
         trend_mode=hr_trend_mode,
         n_planets=n_planets,
-        ld_profile=ld_profile
+        ld_profile=ld_profile,
+        vmap_chunk_size=vmap_chunk_size
     )
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
