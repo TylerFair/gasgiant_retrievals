@@ -7,8 +7,8 @@ import jax.numpy as jnp
 
 def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, filename, ncols=3, detrend_type='linear'):
     """
-    Plot the MAP fits for each wavelength. The transit parameters (period, duration, 
-    impact parameter, and transit time) are provided via transit_params, and detrend_offset 
+    Plot the MAP fits for each wavelength. The transit parameters (period, duration,
+    impact parameter, and transit time) are provided via transit_params, and detrend_offset
     is the value used to detrend the light curve.
     """
     nrows = int(np.ceil(len(wavelengths) / ncols))
@@ -16,7 +16,7 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
     gs = gridspec.GridSpec(nrows, ncols, hspace=0, wspace=0)
     norm = plt.Normalize(wavelengths.min(), wavelengths.max())
     colors = plt.cm.winter(norm(wavelengths))
-   
+
     
     for i in range(len(wavelengths)):
         ax = plt.subplot(gs[i // ncols, i % ncols])
@@ -26,20 +26,35 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
         if detrend_type != 'none':
             c_i = map_params['c'][i]
             v_i = map_params['v'][i]
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=map_params["duration"],
-            impact_param=map_params["b"],
-            time_transit=map_params["t0"],
-            radius_ratio=rors_i,
-        )
-        model = limb_dark_light_curve(orbit, u_i)(t)
+
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        rors_i_all_planets = np.atleast_1d(rors_i)
+
+        num_planets = len(periods)
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model = total_model_flux
+
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)
         elif detrend_type == 'spot':
             spot_amp = map_params['spot_amp'][i]
             spot_mu = map_params['spot_mu'][i]
@@ -48,9 +63,16 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
         elif detrend_type == 'none':
             trend = 1.0
         else:
-            raise ValueError(f"Unknown detrend_type: {detrend_type}")
+            # Fallback for complex detrending types in plots (simplification)
+            if detrend_type != 'none':
+                 try:
+                    trend = c_i + v_i * (t - jnp.min(t))
+                 except:
+                    trend = 1.0
+            else:
+                 trend = 1.0
             
-        model = model + trend      
+        model = model + trend
         ax.errorbar(t, indiv_y[i], yerr=jitter[i], fmt='.', alpha=0.3,
                     color=colors[i], label='Data', ms=1, zorder=2)
         ax.plot(t, model, c='k', alpha=1, lw=2.8,
@@ -74,7 +96,7 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
     gs = gridspec.GridSpec(nrows, ncols, hspace=0, wspace=0)
     norm = plt.Normalize(wavelengths.min(), wavelengths.max())
     colors = plt.cm.winter(norm(wavelengths))
-    
+
     for i in range(len(wavelengths)):
         ax = plt.subplot(gs[i // ncols, i % ncols])
         rors_i = map_params['rors'][i]
@@ -83,20 +105,33 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
             c_i = map_params['c'][i]
             v_i = map_params['v'][i]
         
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=map_params["duration"],
-            impact_param=map_params["b"],
-            time_transit=map_params["t0"],
-            radius_ratio=rors_i,
-        )
-        model = limb_dark_light_curve(orbit, u_i)(t)
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        rors_i_all_planets = np.atleast_1d(rors_i)
+
+        num_planets = len(periods)
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model = total_model_flux
         if detrend_type == 'linear':
             trend = c_i + v_i * (t - jnp.min(t))
         elif detrend_type == 'explinear':
             A_i = map_params['A'][i]
             tau_i = map_params['tau'][i]
-            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)     
+            trend = c_i + v_i * (t - jnp.min(t)) + A_i * jnp.exp(-(t - jnp.min(t))/tau_i)
         elif detrend_type == 'spot':
             spot_amp = map_params['spot_amp'][i]
             spot_mu = map_params['spot_mu'][i]
@@ -105,8 +140,15 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
         elif detrend_type == 'none':
             trend = 1.0
         else:
-            raise ValueError(f"Unknown detrend_type: {detrend_type}")
-            
+             # Fallback
+            if detrend_type != 'none':
+                 try:
+                    trend = c_i + v_i * (t - jnp.min(t))
+                 except:
+                    trend = 1.0
+            else:
+                 trend = 1.0
+
         model = model + trend
         residuals = indiv_y[i] - model
         
@@ -126,37 +168,48 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
 
 def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
     """
-    Plot the transmission spectrum from MCMC results.
+    Plot the transmission spectrum from MCMC results. Handles multi-planet systems.
     
     Parameters:
     -----------
     wavelengths : array-like
-        The wavelengths at which the spectrum is measured
+        The wavelengths at which the spectrum is measured.
     rors_posterior : array-like
-        The posterior samples for rors (radius ratio)
+        The posterior samples for rors (radius ratio). Shape can be (n_samples, n_lcs) for
+        a single planet or (n_samples, n_lcs, n_planets) for multiple planets.
     """
-
     depth_chain = rors_posterior**2
-    depth_median = np.percentile(depth_chain, [50], axis=0)
-    depth_lower, depth_upper = depth_median - np.percentile(depth_chain, [16], axis=0), np.percentile(depth_chain, [84], axis=0) - depth_median
-    fig = plt.figure(figsize=(10, 8))
-    print(jnp.shape(depth_median))
-    depth_median, depth_lower, depth_upper = depth_median[0,:], depth_lower[0,:], depth_upper[0,:]
-    print(jnp.shape(depth_median))
-    # Just plot the transmission spectrum
-    plt.errorbar(wavelengths, depth_median*1e6, 
-                    yerr=[depth_lower*1e6, depth_upper*1e6],
-                    fmt='o', mfc='white', mec='r', ecolor='r')
-    plt.xlabel("Wavelength (µm)")
-    plt.ylabel("Depth (ppm)")
-    plt.savefig(filename, dpi=200)
 
+    if depth_chain.ndim == 2:  # single planet case for backward compatibility
+        depth_chain = depth_chain[:, :, np.newaxis]
+
+    n_planets = depth_chain.shape[2]
+
+    fig = plt.figure(figsize=(10, 8))
+    colors = plt.cm.viridis(np.linspace(0, 1, n_planets))
+
+    for i in range(n_planets):
+        plt.figure()
+        planet_depth_chain = depth_chain[:, :, i]
+        depth_median = np.percentile(planet_depth_chain, 50, axis=0)
+        depth_16 = np.percentile(planet_depth_chain, 16, axis=0)
+        depth_84 = np.percentile(planet_depth_chain, 84, axis=0)
+
+        y_err = [depth_median - depth_16, depth_84 - depth_median]
+
+        plt.errorbar(wavelengths, depth_median * 1e6,
+                     yerr=np.array(y_err) * 1e6,
+                     fmt='o', mfc='k', mec='k', ecolor='k', label=f'Planet {i + 1}')
+
+        plt.xlabel("Wavelength (µm)")
+        plt.ylabel("Depth (ppm)")
+        plt.savefig(filename+f'_0{i}', dpi=200)
+        plt.close()
     return fig
 
 def plot_wavelength_offset_summary(
     t, indiv_y, jitter, wavelengths, map_params, transit_params,
-    filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
-    align_residuals_to_model=True  # keep True for vertical alignment to left panel
+    filename, detrend_type='linear', use_hours=True, residual_scale=2.0, gp_trend=None, spot_trend=None, jump_trend=None
 ):
     import numpy as np
     import matplotlib.pyplot as plt
@@ -175,8 +228,8 @@ def plot_wavelength_offset_summary(
     selected_lcs = len(indices)
 
     # --- time relative to t0 (hours like the paper) ---
-    t0 = float(map_params["t0"])
-    t_centered = (t - t0) * (24.0 if use_hours else 1.0)
+    t0_ref = float(np.atleast_1d(map_params["t0"])[0]) # Center on first planet
+    t_centered = (t - t0_ref) * (24.0 if use_hours else 1.0)
     t_unit = "hours" if use_hours else "days"
 
     # --- colors ---
@@ -184,8 +237,11 @@ def plot_wavelength_offset_summary(
     cmap = plt.cm.turbo
     colors = cmap(norm(wavelengths[indices]))
 
-    # --- depths & vertical spacing (your tighter step) ---
-    depths = np.asarray(map_params['rors'])[indices]**2
+    # --- depths & vertical spacing ---
+    all_rors = np.asarray(map_params['rors'])[indices]
+    # Use first planet's depths for spacing if multi-planet
+    rors_for_spacing = all_rors if all_rors.ndim == 1 else all_rors[:, 0]
+    depths = rors_for_spacing**2
     depth_med = float(np.nanmedian(depths))
     depth_max = float(np.nanmax(depths))
     step = 0.5 * depth_med
@@ -208,35 +264,73 @@ def plot_wavelength_offset_summary(
     # --- per-curve plotting ---
     for i, idx in enumerate(indices):
         yoff = offsets[i]
-        rors_i = float(map_params['rors'][idx])
+        rors_i_all_planets = np.atleast_1d(map_params['rors'][idx])
         u_i = np.asarray(map_params['u'][idx])
 
-        # Transit model
-        orbit = TransitOrbit(
-            period=transit_params["period"],
-            duration=float(map_params["duration"]),
-            impact_param=float(map_params["b"]),
-            time_transit=t0,
-            radius_ratio=rors_i,
-        )
-        model_transit = limb_dark_light_curve(orbit, u_i)(t)
+        # Multi-planet model calculation
+        total_model_flux = np.zeros_like(t)
+        periods = np.atleast_1d(transit_params["period"])
+        durations = np.atleast_1d(map_params["duration"])
+        bs = np.atleast_1d(map_params["b"])
+        t0s = np.atleast_1d(map_params["t0"])
+        num_planets = len(periods)
+
+        for p_idx in range(num_planets):
+            orbit = TransitOrbit(
+                period=periods[p_idx],
+                duration=durations[p_idx],
+                impact_param=bs[p_idx],
+                time_transit=t0s[p_idx],
+                radius_ratio=rors_i_all_planets[p_idx],
+            )
+            planet_model = limb_dark_light_curve(orbit, u_i)(t)
+            total_model_flux += planet_model
+
+        model_transit = total_model_flux
 
         # Detrend model
+        trend = np.ones_like(t)
         if detrend_type != 'none':
-            c_i = map_params['c'][idx]; v_i = map_params['v'][idx]
-            t_shift = t - np.min(t)
-            if detrend_type == 'linear':
-                trend = c_i + v_i * t_shift
-            elif detrend_type == 'explinear':
-                A_i = map_params['A'][idx]; tau_i = map_params['tau'][idx]
-                trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
-            elif detrend_type == 'spot':
-                spot_amp = map_params['spot_amp'][idx]
-                spot_mu  = map_params['spot_mu'][idx]
-                spot_sig = map_params['spot_sigma'][idx]
-                trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
-        else:
-            trend = 1.0
+            c_i = map_params['c'][idx]
+            
+            if 'gp_spectroscopic' in detrend_type:
+                trend_parametric = c_i
+                if 'linear' in detrend_type and 'v' in map_params:
+                    trend_parametric += map_params['v'][idx] * (t - np.min(t))
+                if 'quadratic' in detrend_type and 'v2' in map_params:
+                     trend_parametric += map_params['v2'][idx] * (t - np.min(t))**2
+                
+                trend = trend_parametric + map_params['A_gp'][idx] * gp_trend
+            
+            elif detrend_type == 'spot_spectroscopic':
+                trend = c_i + map_params['A_spot'][idx] * spot_trend
+            
+            elif detrend_type == 'linear_discontinuity_spectroscopic':
+                trend = c_i + map_params['A_jump'][idx] * jump_trend
+
+            else:
+                v_i = map_params.get('v', [0.0]*num_lcs)[idx]
+                t_shift = t - np.min(t)
+                if detrend_type == 'linear':
+                    trend = c_i + v_i * t_shift
+                elif detrend_type == 'linear_discontinuity':
+                    t_jump_i = map_params['t_jump'][idx]
+                    jump_i = map_params['jump'][idx]
+                    trend = c_i + v_i * t_shift + np.where(t > t_jump_i, jump_i, 0.0)
+                elif detrend_type == 'explinear':
+                    A_i = map_params['A'][idx]; tau_i = map_params['tau'][idx]
+                    trend = c_i + v_i * t_shift + A_i * np.exp(-t_shift / tau_i)
+                elif detrend_type == 'spot':
+                    spot_amp = map_params['spot_amp'][idx]
+                    spot_mu  = map_params['spot_mu'][idx]
+                    spot_sig = map_params['spot_sigma'][idx]
+                    trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
+                elif detrend_type == 'quadratic':
+                    v2_i = map_params['v2'][idx]
+                    trend = c_i + v_i * t_shift + v2_i * t_shift**2
+                # Fallback
+                else:
+                    trend = c_i + v_i * t_shift
 
         full_model = model_transit + trend
         resid = indiv_y[idx] - full_model
@@ -284,10 +378,7 @@ def plot_wavelength_offset_summary(
     plt.subplots_adjust(wspace=0.02)  # almost touching
     
     ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=False, prune=None))
-    #ax2.yaxis.set_ticks(ax1.get_yticks())
     
     plt.tight_layout()
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     return fig
-
-

@@ -1,14 +1,143 @@
-import os
+import os, sys, glob
 import numpy as np
 import pandas as pd
+import jax
 import jax.numpy as jnp
 import pickle
 from exotedrf.stage4 import bin_at_resolution, bin_at_pixel
-import new_unpack
-import jax
+from astropy.io import fits
 import matplotlib.pyplot as plt 
 jax.config.update('jax_enable_x64', True)
 
+def unpack_niriss_exotedrf(infile, order, trim_start, trim_end, wl_min_o1=None, wl_max_o1=None, wl_min_o2=None, wl_max_o2=None):    
+
+    bjd = fits.getdata(infile, 9)
+    wave = fits.getdata(infile, 1 + 4 * (order - 1))
+    wave_err = fits.getdata(infile, 2 + 4 * (order - 1))
+    fluxcube = fits.getdata(infile, 3 + 4 * (order - 1))
+    fluxcube_err = fits.getdata(infile, 4 + 4 * (order -1))
+    wave = wave[5:-5]
+    wave_err = wave_err[5:-5]
+    fluxcube = fluxcube[:, 5:-5]
+    fluxcube_err = fluxcube_err[:, 5:-5]
+    
+    start = 0 if (trim_start is None) else int(trim_start)
+    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
+
+    fluxcube     = fluxcube[start:stop, :]
+    fluxcube_err = fluxcube_err[start:stop, :]
+    bjd            = bjd[start:stop]   # keep time aligned!
+
+
+    if order == 2:
+        ii = np.where((wave >= 0.6) & (wave <= 0.85))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
+    if wl_min_o1 is not None and wl_max_o1 is not None and order == 1:
+        ii = np.where((wave >= wl_min_o1) & (wave <= wl_max_o1))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+    
+    if wl_min_o2 is not None and wl_max_o2 is not None and order == 2:
+        ii = np.where((wave >= wl_min_o2) & (wave <= wl_max_o2))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
+    wavelength = wave
+    wavelength_err = wave_err
+    t = np.array(bjd)
+    fluxcube = np.array(fluxcube)
+    fluxcube_err = np.array(fluxcube_err)
+
+    return wavelength,wavelength_err, t, fluxcube, fluxcube_err
+
+def unpack_nirspec_exotedrf(infile, instrument, trim_start, trim_end, wl_min=None, wl_max=None):    
+    print(wl_min, wl_max)
+    bjd = fits.getdata(infile, 5)
+    wave = fits.getdata(infile, 1)
+    wave_err = fits.getdata(infile, 2)
+    fluxcube = fits.getdata(infile, 3)
+    fluxcube_err = fits.getdata(infile, 4)
+    wave = wave[5:-5]
+    wave_err = wave_err[5:-5]
+    fluxcube = fluxcube[:, 5:-5]
+    fluxcube_err = fluxcube_err[:, 5:-5]
+    print(bjd)
+    print(wave)
+    
+    start = 0 if (trim_start is None) else int(trim_start)
+    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
+
+    fluxcube     = fluxcube[start:stop, :]
+    fluxcube_err = fluxcube_err[start:stop, :]
+    bjd            = bjd[start:stop]   # keep time aligned!
+
+
+    if instrument == 'NIRSPEC/G395M' or instrument == 'NIRSPEC/G395H':
+        ii = np.where((wave >= 2.9) & (wave <= 5.0))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+    if instrument == 'NIRSPEC/PRISM':
+        ii = np.where((wave >= 0.6) & (wave <= 5.0))[0]
+        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+    if instrument == 'NIRSPEC/G140H':
+        ii = np.where((wave >= 1.0) & (wave <= 1.8))[0]
+        fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
+    if wl_min is not None and wl_max is not None:
+        ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+
+    wavelength = wave
+    wavelength_err = wave_err
+    t = np.array(bjd)
+    fluxcube = np.array(fluxcube)
+    fluxcube_err = np.array(fluxcube_err)
+    return wavelength, wavelength_err,  t, fluxcube, fluxcube_err
+
+def unpack_miri_exotedrf(infile, trim_start, trim_end, wl_min=None, wl_max=None):
+
+    bjd = fits.getdata(infile, 5)
+    wave = fits.getdata(infile, 1)
+    wave_err = fits.getdata(infile, 2)
+    fluxcube = fits.getdata(infile, 3)
+    fluxcube_err = fits.getdata(infile, 4)
+    wave = wave[5:-5]
+    wave_err = wave_err[5:-5]
+    fluxcube = fluxcube[:, 5:-5]
+    fluxcube_err = fluxcube_err[:, 5:-5]
+
+
+    start = 0 if (trim_start is None) else int(trim_start)
+    stop  = None if (trim_end in (None, 0)) else -int(trim_end)
+
+    fluxcube     = fluxcube[start:stop, :]
+    fluxcube_err = fluxcube_err[start:stop, :]
+    bjd            = bjd[start:stop]   # keep time aligned!
+
+
+    ii = np.where((wave > 5) & (wave <= 12))[0]
+    fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+    wave, wave_err = wave[ii], wave_err[ii]
+    ii = np.argsort(wave)
+    wave, wave_err = wave[ii], wave_err[ii]
+    fluxcube, fluxcube_err = fluxcube[:,ii], fluxcube_err[:,ii]
+
+    if wl_min is not None and wl_max is not None:
+        ii = np.where((wave >= wl_min) & (wave <= wl_max))[0]
+        fluxcube, fluxcube_err = fluxcube[:, ii], fluxcube_err[:,ii]
+        wave, wave_err = wave[ii], wave_err[ii]
+    
+    wavelength = wave
+    wavelength_err = wave_err
+    t = np.array(bjd)
+    fluxcube = np.array(fluxcube)
+    fluxcube_err = np.array(fluxcube_err)
+    return wavelength, wavelength_err, t, fluxcube, fluxcube_err
 
 class SpectroData:
     """Simple container for dot notation access."""
@@ -46,7 +175,6 @@ def normalize_flux(flux, flux_err, norm_range):
             flux_norm[i, :] /= norm
             flux_err_norm[i,:] /= norm 
     return flux_norm, flux_err_norm
-
 
 def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_unbinned, cfg, oot_mask):
     """Handle all the binning logic in one place."""
@@ -104,9 +232,9 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             elif nrs == 2:
                 # NRS2: clip wavelengths > 5.0 microns
                 valid_lr = wl_lr <= 5.0
-        if cfg['instrument'] == 'NIRSPEC/PRISM':
+        elif cfg['instrument'] == 'NIRSPEC/PRISM':
             valid_lr = (wl_lr >= 0.5) & (wl_lr <= 5.0)
-        if cfg['instrument'] == 'NIRSPEC/G140H':
+        elif cfg['instrument'] == 'NIRSPEC/G140H':
             valid_lr = (wl_lr >= 1.0) & (wl_lr <= 1.8)
         else:
             valid_lr = np.ones(len(wl_lr), dtype=bool)
@@ -146,9 +274,9 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             elif nrs == 2:
                 # NRS2: clip wavelengths > 5.0 microns
                 valid_hr = wl_hr <= 5.0
-        if cfg['instrument'] == 'NIRSPEC/PRISM':
+        elif cfg['instrument'] == 'NIRSPEC/PRISM':
             valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
-        if cfg['instrument'] == 'NIRSPEC/G140H':
+        elif cfg['instrument'] == 'NIRSPEC/G140H':
             valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
         else:
             valid_hr = np.ones(len(wl_hr), dtype=bool) 
@@ -237,7 +365,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
 
                 valid_lr = wl_lr <= 5.0
                 wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
-        if cfg['instrument'] == 'NIRSPEC/PRISM':
+        elif cfg['instrument'] == 'NIRSPEC/PRISM':
             valid_hr = (wl_hr >= 0.5) & (wl_hr <= 5.0)
             wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
             flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
@@ -246,7 +374,7 @@ def bin_spectroscopy_data(wavelengths, wavelengths_err, flux_unbinned, flux_err_
             wl_lr, wl_err_lr = wl_lr[valid_lr], wl_err_lr[valid_lr]
             flux_lr, flux_err_lr = flux_lr[valid_lr], flux_err_lr[valid_lr] 
        
-        if cfg['instrument'] == 'NIRSPEC/G140H':
+        elif cfg['instrument'] == 'NIRSPEC/G140H':
             valid_hr = (wl_hr >= 1.0) & (wl_hr <= 1.8)
             wl_hr, wl_err_hr = wl_hr[valid_hr], wl_err_hr[valid_hr]
             flux_hr, flux_err_hr = flux_hr[valid_hr], flux_err_hr[valid_hr]
@@ -327,14 +455,14 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet_cfg = cfg['planet']
         prior_duration = planet_cfg['duration']
         prior_t0 = planet_cfg['t0']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_nirspec_exoted(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_nirspec_exotedrf(fits_file, instrument, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
         mini_instrument = nrs
     elif instrument == 'NIRISS/SOSS':
         order = cfg['order']
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_niriss_exoted(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_niriss_exotedrf(fits_file, order, mask_integrations_start, mask_integrations_end, wl_min_o1=wl_min_o1, wl_max_o1=wl_max_o1, wl_min_o2=wl_min_o2, wl_max_o2=wl_max_o2)
         mini_instrument = order
     elif instrument == 'MIRI/LRS':
-        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = new_unpack.unpack_miri_exoted(fits_file, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
+        wavelengths, wavelengths_err, time, flux_unbinned, flux_err_unbinned = unpack_miri_exotedrf(fits_file, mask_integrations_start, mask_integrations_end, wl_min=wl_min, wl_max=wl_max)
         mini_instrument = '' 
     else:
         raise NotImplementedError(f'Instrument {instrument} not implemented yet')
@@ -342,54 +470,124 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
     wavelengths = np.array(wavelengths)
     wavelengths_err = np.array(wavelengths_err)
     time = np.array(time)
-    flux_unbinned = np.array(flux_unbinned)  # Shape: (n_time, n_wavelength)
+    flux_unbinned = np.array(flux_unbinned)  # shape: (n_time, n_wavelength)
     flux_err_unbinned = np.array(flux_err_unbinned) 
-    # Remove NaN columns
+
     nanmask = np.all(np.isnan(flux_unbinned), axis=0)
     wavelengths, wavelengths_err = wavelengths[~nanmask], wavelengths_err[~nanmask]
     flux_unbinned, flux_err_unbinned = flux_unbinned[:, ~nanmask], flux_err_unbinned[:, ~nanmask]
 
-    # Apply time masking criteria (useful for spot-crossings)
-    if mask_start is not None and mask_end is None:
-        raise ValueError('Time mask start supplied but missing end time! Please give mask_end')
-    if mask_end is not None and mask_start is None:
-        raise ValueError('Time mask end supplied but missing start time! Please give mask_start')
-    
+    # time masking supported inputs
+  #
+    # - mask_start/mask_end can be scalars, strings, or  lists.
+    # - None values are treated as open-ended (min(time) or max(time)).
+    # - Special directive "cut_phase_to_transit": keep only t0 +- 3 hours.
+
     def evaluate_mask_value(value, time):
-        """Evaluate a mask value that could be a number or string expression."""
+        """Evaluate a mask value that could be a number, None, or a string expression."""
+        if value is None:
+            return None
         if isinstance(value, str):
+            v = value.strip()
+            if v == "cut_phase_to_transit":
+                return v
             namespace = {
-                'jnp': np, 
+                'jnp': np,
                 'np': np,
                 't': time,
                 'time': time,
                 'min': np.min,
                 'max': np.max,
             }
-            return eval(value, {"__builtins__": {}}, namespace)
-        else:
-            return value
-    
-    if mask_start is not None and mask_end is not None:
-        # Check if it's a list/array (but not a string!)
+            return eval(v, {"__builtins__": {}}, namespace)
+        return value
+
+    def _to_pairs(mask_start, mask_end):
+        """Return list of (start,end) pairs from scalar/list inputs."""
+        if mask_start is None and mask_end is None:
+            return []
+
+        # If one side is missing, treat as open-ended
+        if mask_end is None and mask_start is not None:
+            if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
+                return [(s, None) for s in mask_start]
+            return [(mask_start, None)]
+
+        if mask_start is None and mask_end is not None:
+            if hasattr(mask_end, '__len__') and not isinstance(mask_end, str):
+                return [(None, e) for e in mask_end]
+            return [(None, mask_end)]
+
+        # Both provided
         if hasattr(mask_start, '__len__') and not isinstance(mask_start, str):
-            # Multiple time ranges to mask
-            timemask = np.zeros_like(time, dtype=bool)
-            for start, end in zip(mask_start, mask_end):
-                # Evaluate each start/end value
-                start_val = evaluate_mask_value(start, time)
-                end_val = evaluate_mask_value(end, time)
-                timemask |= (time >= start_val) & (time <= end_val)
-        else:
-            # Single time range to mask (could be string or number)
-            start_val = evaluate_mask_value(mask_start, time)
-            end_val = evaluate_mask_value(mask_end, time)
-            timemask = (time >= start_val) & (time <= end_val)
-        
+            if not (hasattr(mask_end, '__len__') and not isinstance(mask_end, str)):
+                raise ValueError("mask_start is a list but mask_end is not.")
+            if len(mask_start) != len(mask_end):
+                raise ValueError("mask_start and mask_end lists must be the same length.")
+            return list(zip(mask_start, mask_end))
+
+        return [(mask_start, mask_end)]
+
+    pairs = _to_pairs(mask_start, mask_end)
+
+    # 1) Handle "cut_phase_to_transit": keep only t0 +- 3 hours (3/24 days)
+    has_cut = any(
+        (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
+        (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
+        for s, e in pairs
+    )
+
+    if has_cut:
+        # Use prior t0(s) from config
+        prior_t0s = np.atleast_1d(cfg['planet']['t0']).astype(float)
+        window = 3.0 / 24.0 
+
+        keep = np.zeros_like(time, dtype=bool)
+        for t0 in prior_t0s:
+            keep |= (time >= (t0 - window)) & (time <= (t0 + window))
+
+        time = time[keep]
+        flux_unbinned = flux_unbinned[keep, :]
+        flux_err_unbinned = flux_err_unbinned[keep, :]
+
+        # Remove cut directives so they don't get evaluated below
+        pairs = [
+            (s, e) for (s, e) in pairs
+            if not (
+                (isinstance(s, str) and s.strip() == "cut_phase_to_transit") or
+                (isinstance(e, str) and e.strip() == "cut_phase_to_transit")
+            )
+        ]
+
+    # 2) Apply "mask out" time ranges (remove points inside each range)
+    if len(pairs) > 0:
+        timemask = np.zeros_like(time, dtype=bool)
+        tmin = float(np.min(time))
+        tmax = float(np.max(time))
+
+        for start, end in pairs:
+            start_val = evaluate_mask_value(start, time)
+            end_val = evaluate_mask_value(end, time)
+
+            # Skip fully-empty pairs
+            if start_val is None and end_val is None:
+                continue
+
+            # Support open-ended masks
+            if start_val is None:
+                start_val = tmin
+            if end_val is None:
+                end_val = tmax
+
+            # If a directive snuck through, ignore it here
+            if start_val == "cut_phase_to_transit" or end_val == "cut_phase_to_transit":
+                continue
+
+            timemask |= (time >= float(start_val)) & (time <= float(end_val))
+
         time = time[~timemask]
         flux_unbinned = flux_unbinned[~timemask, :]
         flux_err_unbinned = flux_err_unbinned[~timemask, :]
-            
     planet_cfg = cfg['planet']
     prior_t0s = np.atleast_1d(planet_cfg['t0'])
     prior_durations = np.atleast_1d(planet_cfg['duration'])
@@ -400,7 +598,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
 
     oot_mask = ~in_transit_mask
 
-    # Do all the binning
     binned_data = bin_spectroscopy_data(
         wavelengths, wavelengths_err, flux_unbinned, flux_err_unbinned, cfg, oot_mask
     )
@@ -428,7 +625,6 @@ def process_spectroscopy_data(instrument, input_dir, output_dir, planet_str, cfg
         planet=planet_str,
         mini_instrument=mini_instrument
     )
-
 
 
 
