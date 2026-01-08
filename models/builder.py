@@ -111,9 +111,9 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
 
         if 'spot' in detrend_components:
-            params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(-0.01, 0.01))
+            params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.01))
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
-            params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(0.0, 0.01))
+            params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1))
 
         if 'gp' in detrend_components:
             params['GP_log_sigma'] = numpyro.sample('GP_log_sigma', dist.Uniform(jnp.log(1e-5), jnp.log(1e3)))
@@ -238,9 +238,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
                     in_axes.update({'A': 0, 'tau': 0})
                 if detrend_type == 'spot':
-                    params['spot_amp'] = numpyro.sample('spot_amp', dist.Normal(mu_spot_amp, 0.01).expand([num_lcs]))
-                    params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(mu_spot_mu, 0.01).expand([num_lcs]))
-                    params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Normal(mu_spot_sigma, 0.01).expand([num_lcs]))
+                    spot_mu_center = jnp.mean(t) if mu_spot_mu is None else mu_spot_mu
+                    params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.01).expand([num_lcs]))
+                    params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(spot_mu_center, 0.01).expand([num_lcs]))
+                    params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1).expand([num_lcs]))
                     in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
 
             elif trend_mode == 'fixed':
