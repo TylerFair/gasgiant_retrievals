@@ -1,53 +1,70 @@
 import jax.numpy as jnp
 from .core import compute_transit_model
 
+def _trend_time(t):
+    return t - jnp.min(t)
+
+def _poly_trend(params, t_norm, order):
+    trend = params["c"] + params["v"] * t_norm
+    if order >= 2:
+        trend = trend + params["v2"] * t_norm**2
+    if order >= 3:
+        trend = trend + params["v3"] * t_norm**3
+    if order >= 4:
+        trend = trend + params["v4"] * t_norm**4
+    return trend
+
 def spot_crossing(t, amp, mu, sigma):
-    return amp * jnp.exp(-0.5 * (t - mu) **2 / sigma **2)
+    sigma = jnp.maximum(jnp.abs(sigma), 1e-6)
+    return amp * jnp.exp(-0.5 * (t - mu) ** 2 / sigma ** 2)
 
 def compute_lc_none(params, t):
     return compute_transit_model(params, t) + 1.0
 
 def compute_lc_linear(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
-    trend = params["c"] + params["v"] * (t - jnp.min(t))
+    trend = _poly_trend(params, t_norm, order=1)
     return lc_transit + trend
 
 def compute_lc_quadratic(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
-    t_norm = t - jnp.min(t)
-    trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2
+    trend = _poly_trend(params, t_norm, order=2)
     return lc_transit + trend
 
 def compute_lc_cubic(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
-    t_norm = t - jnp.min(t)
-    trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2 + params["v3"] * t_norm**3
+    trend = _poly_trend(params, t_norm, order=3)
     return lc_transit + trend
 
 def compute_lc_quartic(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
-    t_norm = t - jnp.min(t)
-    trend = params["c"] + params["v"] * t_norm + params["v2"] * t_norm**2 + params["v3"] * t_norm**3 + params["v4"] * t_norm**4
+    trend = _poly_trend(params, t_norm, order=4)
     return lc_transit + trend
 
 def compute_lc_linear_discontinuity(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
     jump = jnp.where(t > params["t_jump"], params["jump"], 0.0)
-    trend = params["c"] + params["v"] * (t - jnp.min(t)) + jump
+    trend = _poly_trend(params, t_norm, order=1) + jump
     return lc_transit + trend
 
 def compute_lc_explinear(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
-    trend = params["c"] + params["v"] * (t - jnp.min(t)) + params['A'] * jnp.exp(-(t-jnp.min(t)) / params['tau'])
+    trend = _poly_trend(params, t_norm, order=1) + params["A"] * jnp.exp(-t_norm / params["tau"])
     return lc_transit + trend
 
 def compute_lc_spot(params, t):
+    t_norm = _trend_time(t)
     lc_transit = compute_transit_model(params, t)
     spot = spot_crossing(t, params["spot_amp"], params["spot_mu"], params["spot_sigma"])
-    trend = params["c"] + params["v"] * (t - jnp.min(t))
+    trend = _poly_trend(params, t_norm, order=1)
     return lc_transit + trend + spot
 
-# Spectroscopic models that use a fixed trend template
 def compute_lc_spot_spectroscopic(params, t, spot_trend):
     lc_transit = compute_transit_model(params, t)
     return lc_transit + params["c"] + params["A_spot"] * spot_trend
