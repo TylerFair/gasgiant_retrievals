@@ -102,8 +102,10 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             params['v4'] = numpyro.sample('v4', dist.Uniform(-0.1, 0.1))
 
         if 'linear_discontinuity' in detrend_components:
-            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 1e-2))
-            params['jump'] = numpyro.sample('jump', dist.Uniform(-0.1, 0.1))
+            t_jump_guess = prior_params.get('t_jump_guess', 0.5 * (jnp.min(t) + jnp.max(t)))
+            jump_guess = prior_params.get('jump_guess', 0.0)
+            params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 1e-2))
+            params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01))
 
         if 'explinear' in detrend_components:
             params['A'] = numpyro.sample('A', dist.Uniform(-0.1, 0.1))
@@ -111,7 +113,7 @@ def create_whitelight_model(detrend_type='linear', n_planets=1, ld_profile='quad
             params['tau'] = numpyro.deterministic('tau', jnp.exp(log_tau))
 
         if 'spot' in detrend_components:
-            params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.01))
+            params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.1))
             params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(prior_params['spot_guess'], 0.01))
             params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1))
 
@@ -151,6 +153,8 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
 
     if detrend_type not in COMPUTE_KERNELS:
         raise ValueError(f"Unsupported detrend_type for vectorized model: {detrend_type}")
+    if detrend_type in {"spot", "linear_discontinuity"}:
+        raise ValueError(f"Vectorized model does not support '{detrend_type}'. Use '{detrend_type}_spectroscopic' instead.")
 
     compute_lc_kernel = COMPUTE_KERNELS[detrend_type]
     if ld_profile == "power2":
@@ -228,8 +232,10 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     in_axes.update({'v4': 0})
 
                 if detrend_type == 'linear_discontinuity':
-                    params['t_jump'] = numpyro.sample('t_jump', dist.Normal(59791.12, 0.1).expand([num_lcs]))
-                    params['jump'] = numpyro.sample('jump', dist.Uniform(-0.1, 0.1).expand([num_lcs]))
+                    t_jump_guess = jnp.mean(t) if mu_spot_mu is None else mu_spot_mu
+                    jump_guess = 0.0 if mu_spot_amp is None else mu_spot_amp
+                    params['t_jump'] = numpyro.sample('t_jump', dist.Normal(t_jump_guess, 0.1).expand([num_lcs]))
+                    params['jump'] = numpyro.sample('jump', dist.Normal(jump_guess, 0.01).expand([num_lcs]))
                     in_axes.update({'t_jump': 0, 'jump': 0})
 
                 if detrend_type == 'explinear':
@@ -239,7 +245,7 @@ def create_vectorized_model(detrend_type='linear', ld_mode='free', trend_mode='f
                     in_axes.update({'A': 0, 'tau': 0})
                 if detrend_type == 'spot':
                     spot_mu_center = jnp.mean(t) if mu_spot_mu is None else mu_spot_mu
-                    params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.01).expand([num_lcs]))
+                    params['spot_amp'] = numpyro.sample('spot_amp', dist.Uniform(0.0, 0.1).expand([num_lcs]))
                     params['spot_mu'] = numpyro.sample('spot_mu', dist.Normal(spot_mu_center, 0.01).expand([num_lcs]))
                     params['spot_sigma'] = numpyro.sample('spot_sigma', dist.Uniform(1e-4, 0.1).expand([num_lcs]))
                     in_axes.update({'spot_amp': 0, 'spot_mu': 0, 'spot_sigma': 0})
