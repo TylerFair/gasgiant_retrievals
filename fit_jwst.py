@@ -969,6 +969,10 @@ def main():
             if 'linear_discontinuity' in detrending_type:
                 init_params_wl['t_jump'] = 59791.12
                 init_params_wl['jump'] = -0.001 
+            if 'spot' in detrending_type:
+                init_params_wl['spot_amp'] = spot_amp
+                init_params_wl['spot_mu'] = spot_mu
+                init_params_wl['spot_sigma'] = spot_sigma
 
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
             
@@ -1004,7 +1008,8 @@ def main():
                 if "u" in soln:
                     p["u"] = soln["u"]
 
-                for k in ["c", "v", "a2", "a3", "a4","A", "tau", "t_break", "delta", "A_spot", "t_spot", "sigma_spot"]:
+                for k in ["c", "v", "a2", "a3", "a4", "A", "tau", "t_break", "delta",
+                          "spot_amp", "spot_mu", "spot_sigma", "A_spot", "t_spot", "sigma_spot"]:
                     if k in soln:
                         p[k] = soln[k]
 
@@ -1027,17 +1032,54 @@ def main():
                 params_complete = hyper_params_wl.copy()
                 params_complete.update(init_params_wl)
 
-                n_planets = 1
-                if np.isscalar(params_complete.get("b", 0.0)):
-                    params_complete["b"] = jnp.array([params_complete["b"]])
-                if np.isscalar(params_complete.get("rors", 0.0)):
-                    params_complete["rors"] = jnp.array([params_complete["rors"]])
-                if np.isscalar(params_complete.get("t0", 0.0)):
-                    params_complete["t0"] = jnp.array([params_complete["t0"]])
-                if np.isscalar(params_complete.get("duration", 0.0)):
-                    params_complete["duration"] = jnp.array([params_complete["duration"]])
+                n_planets_sanity = len(jnp.atleast_1d(PERIOD_FIXED))
 
-                params_opt = _soln_to_physical_params(soln, params_complete, n_planets=n_planets)
+                def _ensure_len(value, n):
+                    arr = jnp.atleast_1d(value)
+                    if arr.size == 1 and n > 1:
+                        return jnp.repeat(arr, n)
+                    return arr
+
+                params_complete["period"] = _ensure_len(params_complete.get("period", PERIOD_FIXED), n_planets_sanity)
+                params_complete["duration"] = _ensure_len(params_complete.get("duration", PRIOR_DUR), n_planets_sanity)
+                params_complete["t0"] = _ensure_len(params_complete.get("t0", PRIOR_T0), n_planets_sanity)
+                params_complete["b"] = _ensure_len(params_complete.get("b", PRIOR_B), n_planets_sanity)
+                params_complete["rors"] = _ensure_len(params_complete.get("rors", PRIOR_RPRS), n_planets_sanity)
+
+                key_sanity = jax.random.PRNGKey(0) if key_master is None else key_master
+                keys = jax.random.split(key_sanity, num=3)
+
+                stage1 = optimx.optimize(
+                    whitelight_model_for_run,
+                    sites=["logD_0", "t0_0", "_b_0"] if n_planets_sanity == 1 else None,
+                    start=init_params_wl,
+                )
+                soln = stage1(keys[0], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+
+                stage2_sites = ["depths_0"]
+                if ld_profile == "quadratic":
+                    stage2_sites.append("u")
+                elif ld_profile == "power2":
+                    stage2_sites.extend(["c1", "c2"])
+                if n_planets_sanity != 1:
+                    stage2_sites = None
+
+                stage2 = optimx.optimize(
+                    whitelight_model_for_run,
+                    sites=stage2_sites,
+                    start=soln,
+                )
+                soln = stage2(keys[1], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+
+                stage3 = optimx.optimize(
+                    whitelight_model_for_run,
+                    start=soln,
+                )
+                soln = stage3(keys[2], data.wl_time, data.wl_flux_err, y=data.wl_flux, prior_params=hyper_params_wl)
+
+                params_opt = _soln_to_physical_params(soln, params_complete, n_planets=n_planets_sanity)
+                if "rors" not in params_opt and "depths" in params_opt:
+                    params_opt["rors"] = jnp.sqrt(params_opt["depths"])
 
                 flux_init = _get_sanity_model(params_complete, data.wl_time)
                 flux_opt  = _get_sanity_model(params_opt,      data.wl_time)
@@ -1174,7 +1216,12 @@ def main():
 
             spot_trend, jump_trend = None, None
             if 'spot' in detrending_type:
-                spot_trend = spot_crossing(data.wl_time, bestfit_params_wl["spot_amp"], bestfit_params_wl["spot_mu"], bestfit_params_wl["spot_sigma"])
+                spot_trend = spot_crossing(
+                    data.wl_time,
+                    bestfit_params_wl["spot_amp"],
+                    bestfit_params_wl["spot_mu"],
+                    jnp.abs(bestfit_params_wl["spot_sigma"])
+                )
             if 'linear_discontinuity' in detrending_type:
                 jump_trend = jnp.where(data.wl_time > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
 
@@ -1226,6 +1273,8 @@ def main():
                 wl_transit_model = compute_lc_none(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'linear_discontinuity':
                 wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
+            elif detrending_type == 'spot':
+                wl_transit_model = compute_lc_spot(bestfit_params_wl, data.wl_time)
             else:
                  print('Error with model, not defined!')
                  exit()
@@ -1282,16 +1331,17 @@ def main():
                                 width_ratios=[1, 1, 1.3, 1.3], 
                                 hspace=0.3, wspace=0.25)
 
+            duration_bin = jnp.max(jnp.atleast_1d(bestfit_params_wl['duration']))
             b_time, b_flux = jax_bin_lightcurve(jnp.array(data.wl_time), 
                                                 jnp.array(data.wl_flux), 
-                                                bestfit_params_wl['duration'])
+                                                duration_bin)
             
             b_time_det, b_flux_det = jax_bin_lightcurve(jnp.array(t_masked), 
                                                         jnp.array(detrended_flux), 
-                                                        bestfit_params_wl['duration'])
+                                                        duration_bin)
             b_time_det, b_res_det = jax_bin_lightcurve(jnp.array(t_masked), 
                                             jnp.array(residuals_detrended), 
-                                            bestfit_params_wl['duration'])
+                                            duration_bin)
             bin_style = dict(c='darkviolet', edgecolors='darkslateblue', s=40,  zorder=10, label='Binned (8/dur)')
 
             ax1 = fig.add_subplot(gs[0, 0])
@@ -1565,7 +1615,7 @@ def main():
             spot_mu = bestfit_params_wl_df['spot_mu'].values[0]
             spot_sigma = bestfit_params_wl_df['spot_sigma'].values[0]
             if not np.isnan(spot_amp) and not np.isnan(spot_mu) and not np.isnan(spot_sigma):
-                spot_trend = spot_crossing(wl_time_good, spot_amp, spot_mu, spot_sigma)
+                spot_trend = spot_crossing(wl_time_good, spot_amp, spot_mu, np.abs(spot_sigma))
     if 'linear_discontinuity' in detrending_type:
         if {'t_jump', 'jump'}.issubset(bestfit_params_wl_df.columns):
             t_jump = bestfit_params_wl_df['t_jump'].values[0]
@@ -1741,7 +1791,7 @@ def main():
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
-                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, jump_trend=jump_trend)
+                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
         poly_orders = [1, 2, 3, 4]
         wl_lr = np.array(data.wavelengths_lr)
@@ -1800,6 +1850,13 @@ def main():
     detrend_type_multiwave = _spectro_detrend_type(detrending_type)
 
     if valid is not None:
+        if spot_trend is not None and len(spot_trend) != len(time_hr):
+            spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_hr))
+        if jump_trend is not None and len(jump_trend) != len(time_hr):
+            jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_hr))
+        if gp_trend is not None and len(gp_trend) != len(time_hr):
+            gp_trend = _align_trend_to_time(gp_trend, wl_time_good, np.array(time_hr))
+
         time_hr = time_hr[valid]
         flux_hr = flux_hr[:, valid]
         flux_err_hr = flux_err_hr[:, valid]
@@ -1851,9 +1908,15 @@ def main():
     init_params_hr = { "depths": DEPTHS_BASE_HR, "u": U_mu_hr_init if hr_ld_mode!='interpolated' else ld_interpolated_hr }
     if hr_trend_mode == 'free':
         if detrend_type_multiwave != 'none':
-            init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
+            if best_poly_coeffs_c is not None and np.ndim(best_poly_coeffs_c) > 0:
+                init_params_hr["c"] = np.polyval(best_poly_coeffs_c, wl_hr)
+            else:
+                init_params_hr["c"] = jnp.full(num_lcs_hr, bestfit_params_wl_df['c'].values[0])
             if 'v' in bestfit_params_wl_df.columns:
-                 init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
+                 if best_poly_coeffs_v is not None and np.ndim(best_poly_coeffs_v) > 0:
+                     init_params_hr["v"] = np.polyval(best_poly_coeffs_v, wl_hr)
+                 else:
+                     init_params_hr["v"] = jnp.full(num_lcs_hr, bestfit_params_wl_df['v'].values[0])
 
     hr_model_for_run = create_vectorized_model(
         detrend_type=detrend_type_multiwave,
@@ -1932,7 +1995,7 @@ def main():
     plot_wavelength_offset_summary(time_hr, flux_hr, median_total_error_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
-                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend, jump_trend=jump_trend)
+                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
 
     plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, data.wavelengths_err_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
