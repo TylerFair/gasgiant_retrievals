@@ -826,6 +826,8 @@ def main():
     spot_amp = flags.get('spot_amp', 0.0)
     spot_mu = flags.get('spot_center', 0.0)
     spot_sigma = flags.get('spot_width', 0.0)
+    t_jump_guess = flags.get('t_jump_guess', None)
+    jump_guess = flags.get('jump_guess', 0.0)
     save_trace = flags.get('save_whitelight_trace', False)
     vmap_chunk = flags.get('vmap_chunk', False)
     vmap_chunk_size = None
@@ -937,6 +939,9 @@ def main():
             }
             if 'spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
+            if 'linear_discontinuity' in detrending_type:
+                hyper_params_wl['t_jump_guess'] = t_jump_guess if t_jump_guess is not None else 0.5 * (jnp.min(data.wl_time) + jnp.max(data.wl_time))
+                hyper_params_wl['jump_guess'] = jump_guess
 
             hyper_params_wl['u'] = U_mu_wl
 
@@ -967,8 +972,11 @@ def main():
                 init_params_wl['GP_log_sigma'] = jnp.log(jnp.nanmedian(data.wl_flux_err))
                 init_params_wl['GP_log_rho'] = jnp.log(0.1)
             if 'linear_discontinuity' in detrending_type:
-                init_params_wl['t_jump'] = 59791.12
-                init_params_wl['jump'] = -0.001 
+                if t_jump_guess is not None:
+                    init_params_wl['t_jump'] = t_jump_guess
+                else:
+                    init_params_wl['t_jump'] = 0.5 * (jnp.min(data.wl_time) + jnp.max(data.wl_time))
+                init_params_wl['jump'] = jump_guess
             if 'spot' in detrending_type:
                 init_params_wl['spot_amp'] = spot_amp
                 init_params_wl['spot_mu'] = spot_mu
