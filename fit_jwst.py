@@ -36,7 +36,7 @@ from models.core import _to_f64, _tree_to_f64, compute_transit_model, get_I_powe
 from models.trends import (
     spot_crossing, compute_lc_linear, compute_lc_quadratic, compute_lc_cubic,
     compute_lc_quartic, compute_lc_linear_discontinuity, compute_lc_explinear,
-    compute_lc_spot, compute_lc_none
+    compute_lc_spot, compute_lc_2spot, compute_lc_none
 )
 from models.gp import (
     compute_lc_gp_mean, compute_lc_linear_gp_mean, compute_lc_quadratic_gp_mean,
@@ -48,8 +48,9 @@ TREND_PARAMS = [
     'c', 'v', 'v2', 'v3', 'v4', 
     'A', 'tau', 
     'spot_amp', 'spot_mu', 'spot_sigma', 
+    'spot_amp2', 'spot_mu2', 'spot_sigma2',
     't_jump', 'jump', 
-    'A_gp', 'A_spot', 'A_jump'
+    'A_gp', 'A_spot', 'A_spot2', 'A_jump'
 ]
 
 def _param_at(params, name, idx=None):
@@ -68,7 +69,7 @@ def _poly_trend_np(params, t_shift, order, idx=None):
         trend = trend + _param_at(params, "v4", idx) * t_shift**4
     return trend
 
-def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, spot_trend=None, jump_trend=None):
+def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, spot_trend=None, spot_trend2=None, jump_trend=None):
     t_shift = time - np.min(time)
     if detrend_type == 'none':
         return np.ones_like(time)
@@ -80,7 +81,7 @@ def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, s
         poly_order = 3
     elif 'quadratic' in detrend_type:
         poly_order = 2
-    elif 'linear' in detrend_type:
+    elif 'linear' in detrend_type or detrend_type in {'spot', '2spot'}:
         poly_order = 1
 
     if 'gp_spectroscopic' in detrend_type:
@@ -89,6 +90,10 @@ def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, s
             trend = trend + _param_at(params, "A", idx) * np.exp(-t_shift / _param_at(params, "tau", idx))
         return trend + _param_at(params, "A_gp", idx) * gp_trend
 
+    if detrend_type == '2spot_spectroscopic':
+        return (_param_at(params, "c", idx)
+                + _param_at(params, "A_spot", idx) * spot_trend
+                + _param_at(params, "A_spot2", idx) * spot_trend2)
     if detrend_type == 'spot_spectroscopic':
         return _param_at(params, "c", idx) + _param_at(params, "A_spot", idx) * spot_trend
     if detrend_type == 'linear_discontinuity_spectroscopic':
@@ -104,6 +109,11 @@ def _trend_from_params_np(detrend_type, time, params, idx=None, gp_trend=None, s
     elif detrend_type == 'spot':
         if spot_trend is None:
             spot_trend = spot_crossing(time, _param_at(params, "spot_amp", idx), _param_at(params, "spot_mu", idx), _param_at(params, "spot_sigma", idx))
+        trend = trend + spot_trend
+    elif detrend_type == '2spot':
+        if spot_trend is None:
+            spot_trend = spot_crossing(time, _param_at(params, "spot_amp", idx), _param_at(params, "spot_mu", idx), _param_at(params, "spot_sigma", idx))
+            spot_trend = spot_trend + spot_crossing(time, _param_at(params, "spot_amp2", idx), _param_at(params, "spot_mu2", idx), _param_at(params, "spot_sigma2", idx))
         trend = trend + spot_trend
     return trend
 
@@ -664,7 +674,9 @@ def save_detailed_fit_results(time, flux, flux_err, wavelengths, wavelengths_err
                 v_med, v_std, v_l, v_h = get_stats_local(samples['v'][:, i])
                 row.update({'v': v_med, 'v_err': v_std, 'v_err_low': v_l, 'v_err_high': v_h})
         
-        for key in ['v2', 'v3', 'v4', 'A', 'tau', 't_jump', 'jump', 'spot_amp', 'spot_mu', 'spot_sigma', 'A_gp', 'A_spot', 'A_jump']:
+        for key in ['v2', 'v3', 'v4', 'A', 'tau', 't_jump', 'jump',
+                    'spot_amp', 'spot_mu', 'spot_sigma', 'spot_amp2', 'spot_mu2', 'spot_sigma2',
+                    'A_gp', 'A_spot', 'A_spot2', 'A_jump']:
             if key in samples:
                 med, std, low, high = get_stats_local(samples[key][:, i])
                 row.update({
@@ -826,6 +838,9 @@ def main():
     spot_amp = flags.get('spot_amp', 0.0)
     spot_mu = flags.get('spot_center', 0.0)
     spot_sigma = flags.get('spot_width', 0.0)
+    spot_amp2 = flags.get('spot_amp2', flags.get('spot_amp_2', 0.0))
+    spot_mu2 = flags.get('spot_center2', flags.get('spot_center_2', 0.0))
+    spot_sigma2 = flags.get('spot_width2', flags.get('spot_width_2', 0.0))
     t_jump_guess = flags.get('t_jump_guess', None)
     jump_guess = flags.get('jump_guess', 0.0)
     save_trace = flags.get('save_whitelight_trace', False)
@@ -937,7 +952,10 @@ def main():
                 'period': PERIOD_FIXED,
                 'u': U_mu_wl
             }
-            if 'spot' in detrending_type:
+            if '2spot' in detrending_type:
+                hyper_params_wl['spot_guess'] = spot_mu
+                hyper_params_wl['spot_guess2'] = spot_mu2
+            elif 'spot' in detrending_type:
                 hyper_params_wl['spot_guess'] = spot_mu
             if 'linear_discontinuity' in detrending_type:
                 hyper_params_wl['t_jump_guess'] = t_jump_guess if t_jump_guess is not None else 0.5 * (jnp.min(data.wl_time) + jnp.max(data.wl_time))
@@ -981,6 +999,10 @@ def main():
                 init_params_wl['spot_amp'] = spot_amp
                 init_params_wl['spot_mu'] = spot_mu
                 init_params_wl['spot_sigma'] = spot_sigma
+            if '2spot' in detrending_type:
+                init_params_wl['spot_amp2'] = spot_amp2
+                init_params_wl['spot_mu2'] = spot_mu2
+                init_params_wl['spot_sigma2'] = spot_sigma2
 
             whitelight_model_for_run = create_whitelight_model(detrend_type=detrending_type, n_planets=n_planets, ld_profile=ld_profile)
             
@@ -1009,6 +1031,7 @@ def main():
                 elif detrending_type == 'explinear': return compute_lc_explinear(params, t_vals)
                 elif detrending_type == 'linear_discontinuity': return compute_lc_linear_discontinuity(params, t_vals)
                 elif detrending_type == 'spot': return compute_lc_spot(params, t_vals)
+                elif detrending_type == '2spot': return compute_lc_2spot(params, t_vals)
                 elif detrending_type == 'none': return compute_lc_none(params, t_vals)
                 else: return compute_lc_linear(params, t_vals)
             def _soln_to_physical_params(soln, base_params, n_planets=1):
@@ -1017,7 +1040,8 @@ def main():
                     p["u"] = soln["u"]
 
                 for k in ["c", "v", "a2", "a3", "a4", "A", "tau", "t_break", "delta",
-                          "spot_amp", "spot_mu", "spot_sigma", "A_spot", "t_spot", "sigma_spot"]:
+                          "spot_amp", "spot_mu", "spot_sigma", "spot_amp2", "spot_mu2", "spot_sigma2",
+                          "A_spot", "t_spot", "sigma_spot"]:
                     if k in soln:
                         p[k] = soln[k]
 
@@ -1214,6 +1238,10 @@ def main():
                 set_param_stats('spot_amp', wl_samples['spot_amp'])
                 set_param_stats('spot_mu', wl_samples['spot_mu'])
                 set_param_stats('spot_sigma', wl_samples['spot_sigma'])
+            if '2spot' in detrending_type:
+                set_param_stats('spot_amp2', wl_samples['spot_amp2'])
+                set_param_stats('spot_mu2', wl_samples['spot_mu2'])
+                set_param_stats('spot_sigma2', wl_samples['spot_sigma2'])
             if 'linear_discontinuity' in detrending_type:
                 set_param_stats('t_jump', wl_samples['t_jump'])
                 set_param_stats('jump', wl_samples['jump'])
@@ -1222,13 +1250,26 @@ def main():
                 set_param_stats('GP_log_sigma', wl_samples['GP_log_sigma'])
                 set_param_stats('GP_log_rho', wl_samples['GP_log_rho'])
 
-            spot_trend, jump_trend = None, None
-            if 'spot' in detrending_type:
+            spot_trend, spot_trend2, jump_trend = None, None, None
+            if 'spot' in detrending_type and '2spot' not in detrending_type:
                 spot_trend = spot_crossing(
                     data.wl_time,
                     bestfit_params_wl["spot_amp"],
                     bestfit_params_wl["spot_mu"],
                     jnp.abs(bestfit_params_wl["spot_sigma"])
+                )
+            if '2spot' in detrending_type:
+                spot_trend = spot_crossing(
+                    data.wl_time,
+                    bestfit_params_wl["spot_amp"],
+                    bestfit_params_wl["spot_mu"],
+                    jnp.abs(bestfit_params_wl["spot_sigma"])
+                )
+                spot_trend2 = spot_crossing(
+                    data.wl_time,
+                    bestfit_params_wl["spot_amp2"],
+                    bestfit_params_wl["spot_mu2"],
+                    jnp.abs(bestfit_params_wl["spot_sigma2"])
                 )
             if 'linear_discontinuity' in detrending_type:
                 jump_trend = jnp.where(data.wl_time > bestfit_params_wl["t_jump"], bestfit_params_wl["jump"], 0.0)
@@ -1283,6 +1324,8 @@ def main():
                 wl_transit_model = compute_lc_linear_discontinuity(bestfit_params_wl, data.wl_time)
             elif detrending_type == 'spot':
                 wl_transit_model = compute_lc_spot(bestfit_params_wl, data.wl_time)
+            elif detrending_type == '2spot':
+                wl_transit_model = compute_lc_2spot(bestfit_params_wl, data.wl_time)
             else:
                  print('Error with model, not defined!')
                  exit()
@@ -1570,6 +1613,9 @@ def main():
                 add_scalar_param('spot_amp')
                 add_scalar_param('spot_mu')
                 add_scalar_param('spot_sigma')
+                add_scalar_param('spot_amp2')
+                add_scalar_param('spot_mu2')
+                add_scalar_param('spot_sigma2')
                 add_scalar_param('t_jump')
                 add_scalar_param('jump')
                 add_scalar_param('GP_log_sigma')
@@ -1616,14 +1662,27 @@ def main():
     ld_fixed_hr = None
     best_poly_coeffs_c, best_poly_coeffs_v = None, None
     best_poly_coeffs_u1, best_poly_coeffs_u2 = None, None
-    spot_trend, jump_trend = None, None
-    if 'spot' in detrending_type:
+    spot_trend, spot_trend2, jump_trend = None, None, None
+    if 'spot' in detrending_type and '2spot' not in detrending_type:
         if {'spot_amp', 'spot_mu', 'spot_sigma'}.issubset(bestfit_params_wl_df.columns):
             spot_amp = bestfit_params_wl_df['spot_amp'].values[0]
             spot_mu = bestfit_params_wl_df['spot_mu'].values[0]
             spot_sigma = bestfit_params_wl_df['spot_sigma'].values[0]
             if not np.isnan(spot_amp) and not np.isnan(spot_mu) and not np.isnan(spot_sigma):
                 spot_trend = spot_crossing(wl_time_good, spot_amp, spot_mu, np.abs(spot_sigma))
+    if '2spot' in detrending_type:
+        if {'spot_amp', 'spot_mu', 'spot_sigma'}.issubset(bestfit_params_wl_df.columns):
+            spot_amp = bestfit_params_wl_df['spot_amp'].values[0]
+            spot_mu = bestfit_params_wl_df['spot_mu'].values[0]
+            spot_sigma = bestfit_params_wl_df['spot_sigma'].values[0]
+            if not np.isnan(spot_amp) and not np.isnan(spot_mu) and not np.isnan(spot_sigma):
+                spot_trend = spot_crossing(wl_time_good, spot_amp, spot_mu, np.abs(spot_sigma))
+        if {'spot_amp2', 'spot_mu2', 'spot_sigma2'}.issubset(bestfit_params_wl_df.columns):
+            spot_amp2 = bestfit_params_wl_df['spot_amp2'].values[0]
+            spot_mu2 = bestfit_params_wl_df['spot_mu2'].values[0]
+            spot_sigma2 = bestfit_params_wl_df['spot_sigma2'].values[0]
+            if not np.isnan(spot_amp2) and not np.isnan(spot_mu2) and not np.isnan(spot_sigma2):
+                spot_trend2 = spot_crossing(wl_time_good, spot_amp2, spot_mu2, np.abs(spot_sigma2))
     if 'linear_discontinuity' in detrending_type:
         if {'t_jump', 'jump'}.issubset(bestfit_params_wl_df.columns):
             t_jump = bestfit_params_wl_df['t_jump'].values[0]
@@ -1718,7 +1777,18 @@ def main():
         if 'gp_spectroscopic' in detrend_type_multiwave:
             model_run_args_lr['gp_trend'] = gp_trend
             init_params_lr['A_gp'] = jnp.ones(num_lcs_lr)
-        if 'spot_spectroscopic' in detrend_type_multiwave:
+        if detrend_type_multiwave == '2spot_spectroscopic':
+            if spot_trend is None or spot_trend2 is None:
+                raise ValueError("2spot_spectroscopic requires WL spot and spot2 trends.")
+            if len(spot_trend) != len(time_lr):
+                spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_lr))
+            if len(spot_trend2) != len(time_lr):
+                spot_trend2 = _align_trend_to_time(spot_trend2, wl_time_good, np.array(time_lr))
+            model_run_args_lr['spot_trend'] = spot_trend
+            model_run_args_lr['spot_trend2'] = spot_trend2
+            init_params_lr['A_spot'] = jnp.ones(num_lcs_lr)
+            init_params_lr['A_spot2'] = jnp.ones(num_lcs_lr)
+        elif detrend_type_multiwave == 'spot_spectroscopic':
             if spot_trend is not None and len(spot_trend) != len(time_lr):
                 spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_lr))
             model_run_args_lr['spot_trend'] = spot_trend
@@ -1771,7 +1841,9 @@ def main():
 
         if 'gp_spectroscopic' in detrend_type_multiwave:
             model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None))(map_params_lr, time_lr, gp_trend)
-        elif 'spot_spectroscopic' in detrend_type_multiwave:
+        elif detrend_type_multiwave == '2spot_spectroscopic':
+            model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None, None))(map_params_lr, time_lr, spot_trend, spot_trend2)
+        elif detrend_type_multiwave == 'spot_spectroscopic':
             model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None))(map_params_lr, time_lr, spot_trend)
         elif 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
             model_all = jax.vmap(selected_kernel, in_axes=(final_in_axes, None, None))(map_params_lr, time_lr, jump_trend)
@@ -1792,6 +1864,7 @@ def main():
         flux_err_lr = flux_err_lr[:, valid]
         if gp_trend is not None: gp_trend = gp_trend[valid]
         if spot_trend is not None: spot_trend = spot_trend[valid]
+        if spot_trend2 is not None: spot_trend2 = spot_trend2[valid]
         if jump_trend is not None: jump_trend = jump_trend[valid]
         
         print("Plotting low-resolution fits and residuals...")
@@ -1799,7 +1872,7 @@ def main():
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
-                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
+                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2, jump_trend=jump_trend)
 
         poly_orders = [1, 2, 3, 4]
         wl_lr = np.array(data.wavelengths_lr)
@@ -1860,6 +1933,8 @@ def main():
     if valid is not None:
         if spot_trend is not None and len(spot_trend) != len(time_hr):
             spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_hr))
+        if spot_trend2 is not None and len(spot_trend2) != len(time_hr):
+            spot_trend2 = _align_trend_to_time(spot_trend2, wl_time_good, np.array(time_hr))
         if jump_trend is not None and len(jump_trend) != len(time_hr):
             jump_trend = _align_trend_to_time(jump_trend, wl_time_good, np.array(time_hr))
         if gp_trend is not None and len(gp_trend) != len(time_hr):
@@ -1870,6 +1945,7 @@ def main():
         flux_err_hr = flux_err_hr[:, valid]
         if gp_trend is not None: gp_trend = gp_trend[valid]
         if spot_trend is not None: spot_trend = spot_trend[valid]
+        if spot_trend2 is not None: spot_trend2 = spot_trend2[valid]
         if jump_trend is not None: jump_trend = jump_trend[valid]
 
     num_lcs_hr = flux_err_hr.shape[0]
@@ -1937,7 +2013,18 @@ def main():
     if 'gp_spectroscopic' in detrend_type_multiwave:
         model_run_args_hr['gp_trend'] = gp_trend
         init_params_hr['A_gp'] = jnp.ones(num_lcs_hr)
-    if 'spot_spectroscopic' in detrend_type_multiwave:
+    if detrend_type_multiwave == '2spot_spectroscopic':
+        if spot_trend is None or spot_trend2 is None:
+            raise ValueError("2spot_spectroscopic requires WL spot and spot2 trends.")
+        if len(spot_trend) != len(time_hr):
+            spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_hr))
+        if len(spot_trend2) != len(time_hr):
+            spot_trend2 = _align_trend_to_time(spot_trend2, wl_time_good, np.array(time_hr))
+        model_run_args_hr['spot_trend'] = spot_trend
+        model_run_args_hr['spot_trend2'] = spot_trend2
+        init_params_hr['A_spot'] = jnp.ones(num_lcs_hr)
+        init_params_hr['A_spot2'] = jnp.ones(num_lcs_hr)
+    elif detrend_type_multiwave == 'spot_spectroscopic':
         if spot_trend is not None and len(spot_trend) != len(time_hr):
             spot_trend = _align_trend_to_time(spot_trend, wl_time_good, np.array(time_hr))
         model_run_args_hr['spot_trend'] = spot_trend
@@ -1989,7 +2076,9 @@ def main():
     
     if 'gp_spectroscopic' in detrend_type_multiwave:
         model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None))(map_params_hr, time_hr, gp_trend)
-    elif 'spot_spectroscopic' in detrend_type_multiwave:
+    elif detrend_type_multiwave == '2spot_spectroscopic':
+        model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None, None))(map_params_hr, time_hr, spot_trend, spot_trend2)
+    elif detrend_type_multiwave == 'spot_spectroscopic':
         model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None))(map_params_hr, time_hr, spot_trend)
     elif 'linear_discontinuity_spectroscopic' in detrend_type_multiwave:
         model_all_hr = jax.vmap(selected_kernel_hr, in_axes=(final_in_axes_hr, None, None))(map_params_hr, time_hr, jump_trend)
@@ -2003,7 +2092,7 @@ def main():
     plot_wavelength_offset_summary(time_hr, flux_hr, median_total_error_hr, data.wavelengths_hr,
                                     map_params_hr, {"period": PERIOD_FIXED},
                                     f"{output_dir}/34_{instrument_full_str}_{hr_bin_str}_summary.png",
-                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
+                                    detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2, jump_trend=jump_trend)
 
     plot_transmission_spectrum(wl_hr, samples_hr["rors"], f"{output_dir}/31_{instrument_full_str}_{hr_bin_str}_spectrum")
     save_results(wl_hr, data.wavelengths_err_hr, samples_hr,  f"{output_dir}/{instrument_full_str}_{hr_bin_str}.csv")
