@@ -1859,20 +1859,24 @@ def main():
         time_mask = np.any(point_mask, axis=0)
         valid = ~time_mask
         np.save(lr_mask_path, time_mask)
+        gp_trend_lr = gp_trend
+        spot_trend_lr = spot_trend
+        spot_trend2_lr = spot_trend2
+        jump_trend_lr = jump_trend
         time_lr = time_lr[valid]
         flux_lr = flux_lr[:, valid]
         flux_err_lr = flux_err_lr[:, valid]
-        if gp_trend is not None: gp_trend = gp_trend[valid]
-        if spot_trend is not None: spot_trend = spot_trend[valid]
-        if spot_trend2 is not None: spot_trend2 = spot_trend2[valid]
-        if jump_trend is not None: jump_trend = jump_trend[valid]
+        if gp_trend_lr is not None: gp_trend_lr = gp_trend_lr[valid]
+        if spot_trend_lr is not None: spot_trend_lr = spot_trend_lr[valid]
+        if spot_trend2_lr is not None: spot_trend2_lr = spot_trend2_lr[valid]
+        if jump_trend_lr is not None: jump_trend_lr = jump_trend_lr[valid]
         
         print("Plotting low-resolution fits and residuals...")
         median_total_error_lr = np.nanmedian(samples_lr['total_error'], axis=0)
         plot_wavelength_offset_summary(time_lr, flux_lr, median_total_error_lr, data.wavelengths_lr,
                                      map_params_lr, {"period": PERIOD_FIXED},
                                      f"{output_dir}/22_{instrument_full_str}_{lr_bin_str}_summary.png",
-                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend, spot_trend=spot_trend, spot_trend2=spot_trend2, jump_trend=jump_trend)
+                                     detrend_type=detrend_type_multiwave, gp_trend=gp_trend_lr, spot_trend=spot_trend_lr, spot_trend2=spot_trend2_lr, jump_trend=jump_trend_lr)
 
         poly_orders = [1, 2, 3, 4]
         wl_lr = np.array(data.wavelengths_lr)
@@ -1913,7 +1917,7 @@ def main():
 
         plot_transmission_spectrum(wl_lr, samples_lr["rors"], f"{output_dir}/24_{instrument_full_str}_{lr_bin_str}_spectrum")
         save_results(wl_lr, data.wavelengths_err_lr, samples_lr, f"{output_dir}/{instrument_full_str}_{lr_bin_str}.csv")
-        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend, spot_trend=spot_trend, jump_trend=jump_trend)
+        save_detailed_fit_results(time_lr, flux_lr, flux_err_lr, data.wavelengths_lr, data.wavelengths_err_lr, samples_lr, map_params_lr, {"period": PERIOD_FIXED}, detrend_type_multiwave, f"{output_dir}/{instrument_full_str}_{lr_bin_str}", median_total_error_lr, gp_trend=gp_trend_lr, spot_trend=spot_trend_lr, jump_trend=jump_trend_lr)
 
     print(f"\n--- Running High-Resolution Analysis (Binned to {hr_bin_str}) ---")
     time_hr = jnp.array(data.time[spec_good_mask])
