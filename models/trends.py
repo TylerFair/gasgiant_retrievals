@@ -65,9 +65,21 @@ def compute_lc_spot(params, t):
     trend = _poly_trend(params, t_norm, order=1)
     return lc_transit + trend + spot
 
+def compute_lc_2spot(params, t):
+    t_norm = _trend_time(t)
+    lc_transit = compute_transit_model(params, t)
+    spot_1 = spot_crossing(t, params["spot_amp"], params["spot_mu"], params["spot_sigma"])
+    spot_2 = spot_crossing(t, params["spot_amp2"], params["spot_mu2"], params["spot_sigma2"])
+    trend = _poly_trend(params, t_norm, order=1)
+    return lc_transit + trend + spot_1 + spot_2
+
 def compute_lc_spot_spectroscopic(params, t, spot_trend):
     lc_transit = compute_transit_model(params, t)
     return lc_transit + params["c"] + params["A_spot"] * spot_trend
+
+def compute_lc_2spot_spectroscopic(params, t, spot_trend, spot_trend2):
+    lc_transit = compute_transit_model(params, t)
+    return lc_transit + params["c"] + params["A_spot"] * spot_trend + params["A_spot2"] * spot_trend2
 
 def compute_lc_linear_discontinuity_spectroscopic(params, t, jump_trend):
     lc_transit = compute_transit_model(params, t)
