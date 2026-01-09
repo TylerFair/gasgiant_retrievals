@@ -60,6 +60,16 @@ def plot_map_fits(t, indiv_y, jitter, wavelengths, map_params, transit_params, f
             spot_mu = map_params['spot_mu'][i]
             spot_sigma = map_params['spot_sigma'][i]
             trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+        elif detrend_type == '2spot':
+            spot_amp = map_params['spot_amp'][i]
+            spot_mu = map_params['spot_mu'][i]
+            spot_sigma = map_params['spot_sigma'][i]
+            spot_amp2 = map_params['spot_amp2'][i]
+            spot_mu2 = map_params['spot_mu2'][i]
+            spot_sigma2 = map_params['spot_sigma2'][i]
+            spot_term = spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2)
+            spot_term2 = spot_amp2 * jnp.exp(-0.5 * (t - spot_mu2)**2 / spot_sigma2**2)
+            trend = c_i + v_i * (t - jnp.min(t)) + spot_term + spot_term2
         elif detrend_type == 'none':
             trend = 1.0
         else:
@@ -137,6 +147,16 @@ def plot_map_residuals(t, indiv_y, jitter, wavelengths, map_params, transit_para
             spot_mu = map_params['spot_mu'][i]
             spot_sigma = map_params['spot_sigma'][i]
             trend = c_i + v_i * (t - jnp.min(t)) + (spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2))
+        elif detrend_type == '2spot':
+            spot_amp = map_params['spot_amp'][i]
+            spot_mu = map_params['spot_mu'][i]
+            spot_sigma = map_params['spot_sigma'][i]
+            spot_amp2 = map_params['spot_amp2'][i]
+            spot_mu2 = map_params['spot_mu2'][i]
+            spot_sigma2 = map_params['spot_sigma2'][i]
+            spot_term = spot_amp * jnp.exp(-0.5 * (t - spot_mu)**2 / spot_sigma**2)
+            spot_term2 = spot_amp2 * jnp.exp(-0.5 * (t - spot_mu2)**2 / spot_sigma2**2)
+            trend = c_i + v_i * (t - jnp.min(t)) + spot_term + spot_term2
         elif detrend_type == 'none':
             trend = 1.0
         else:
@@ -209,7 +229,8 @@ def plot_transmission_spectrum(wavelengths, rors_posterior, filename):
 
 def plot_wavelength_offset_summary(
     t, indiv_y, jitter, wavelengths, map_params, transit_params,
-    filename, detrend_type='linear', use_hours=True, residual_scale=2.0, gp_trend=None, spot_trend=None, jump_trend=None
+    filename, detrend_type='linear', use_hours=True, residual_scale=2.0,
+    gp_trend=None, spot_trend=None, spot_trend2=None, jump_trend=None
 ):
     import numpy as np
     import matplotlib.pyplot as plt
@@ -302,6 +323,8 @@ def plot_wavelength_offset_summary(
                 
                 trend = trend_parametric + map_params['A_gp'][idx] * gp_trend
             
+            elif detrend_type == '2spot_spectroscopic':
+                trend = c_i + map_params['A_spot'][idx] * spot_trend + map_params['A_spot2'][idx] * spot_trend2
             elif detrend_type == 'spot_spectroscopic':
                 trend = c_i + map_params['A_spot'][idx] * spot_trend
             
@@ -325,6 +348,16 @@ def plot_wavelength_offset_summary(
                     spot_mu  = map_params['spot_mu'][idx]
                     spot_sig = map_params['spot_sigma'][idx]
                     trend = c_i + v_i * t_shift + spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
+                elif detrend_type == '2spot':
+                    spot_amp = map_params['spot_amp'][idx]
+                    spot_mu  = map_params['spot_mu'][idx]
+                    spot_sig = map_params['spot_sigma'][idx]
+                    spot_amp2 = map_params['spot_amp2'][idx]
+                    spot_mu2  = map_params['spot_mu2'][idx]
+                    spot_sig2 = map_params['spot_sigma2'][idx]
+                    spot_term = spot_amp * np.exp(-0.5 * (t - spot_mu)**2 / spot_sig**2)
+                    spot_term2 = spot_amp2 * np.exp(-0.5 * (t - spot_mu2)**2 / spot_sig2**2)
+                    trend = c_i + v_i * t_shift + spot_term + spot_term2
                 elif detrend_type == 'quadratic':
                     v2_i = map_params['v2'][idx]
                     trend = c_i + v_i * t_shift + v2_i * t_shift**2
